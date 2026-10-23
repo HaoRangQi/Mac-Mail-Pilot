@@ -1,0 +1,623 @@
+import AppKit
+import Combine
+import Foundation
+import SwiftUI
+
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: return "跟随系统"
+        case .light: return "浅色"
+        case .dark: return "深色"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .system: return "circle.lefthalf.filled"
+        case .light: return "sun.max"
+        case .dark: return "moon"
+        }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    var next: Appearance {
+        switch self {
+        case .system: return .light
+        case .light: return .dark
+        case .dark: return .system
+        }
+    }
+}
+
+struct AskTurn: Identifiable, Codable, Hashable {
+    var id: String = UUID().uuidString
+    var question: String
+    var answer: String
+    var date: Date = Date()
+    var accounts: [String] = []
+}
+
+@MainActor
+final class AppModel: ObservableObject {    // 数据
+    @Published var accounts: [Account] = []
+    @Published var mailboxes: [Mailbox] = []
+    @Published var messages: [Message] = []
+    @Published var badges: [String: Int] = [:]
+    @Published var selectedMailboxID: String?
+    @Published var selected: Message?
+    @Published var query: String = ""
+
+    // 状态
+    @Published var loading = false
+    @Published var syncing = false
+    @Published var errorMessage: String?
+    @Published var isDemo = true
+    @Published var aiOutput: String?
+    @Published var aiBusy = false
+    @Published var composing = false
+    @Published var showSettings = false
+    @Published var pendingDelete: Message?
+    @Published var showDeleteConfirm = false
+    @Published var showOnboarding = false
+
+    // 浮动提问框
+    @Published var showAsk = false
+    @Published var askText = ""
+    @Published var askBusy = false
+    @Published var askAllAccounts = false
+    @Published var askAccounts: Set<String> = []
+    @Published var askHistory: [AskTurn] = []
+    @Published var askSelectMode = false
+    @Published var askSelected: Set<String> = []
+
+    @Published var appearance: Appearance {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "mailpilot.appearance") }
+    }
+
+    /// 侧边栏折叠的分组（"fav" / "smart" / 账户 ID）
+    @Published var collapsedSections: Set<String> {
+        didSet { UserDefaults.standard.set(Array(collapsedSections), forKey: "mailpilot.sidebar.collapsed") }
+    }
+
+    let ai = AISettingsStore()
+    let prefs = AIPreferencesStore()
+    private(set) var store: MailStore = DemoStore()
+    private var searchTask: Task<Void, Never>?
+    private var sentSamples: [String] = []
+    private let askStorageKey = "mailpilot.ai.askHistory"
+
+    init() {
+        let raw = UserDefaults.standard.string(forKey: "mailpilot.appearance") ?? Appearance.system.rawValue
+        appearance = Appearance(rawValue: raw) ?? .system
+        collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "mailpilot.sidebar.collapsed") ?? [])
+        loadAskHistory()
+
+        if let native = NativeMailStore() {
+            store = native
+            isDemo = false
+        } else {
+            store = DemoStore()
+            isDemo = true
+            if !UserDefaults.standard.bool(forKey: "mailpilot.onboarding.dismissed") {
+                showOnboarding = true
+            }
+        }
+    }
+
+    // MARK: - 派生
+
+    var selectionTitle: String {
+        guard let id = selectedMailboxID else { return "邮件" }
+        if let smart = SmartBox(rawValue: id) { return smart.title }
+        return mailboxes.first { $0.id == id }?.name ?? "邮件"
+    }
+
+    var totalUnread: Int {
+        mailboxes.filter { $0.role == .inbox }.reduce(0) { $0 + $1.unread }
+    }
+
+    // MARK: - 生命周期
+
+    func load() async {
+        loading = true
+        errorMessage = nil
+        do {
+            accounts = try await store.accounts()
+            mailboxes = try await store.mailboxes()
+            badges = try await store.badgeCounts()
+            isDemo = store.isDemo
+            if selectedMailboxID == nil {
+                selectedMailboxID = SmartBox.allInbox.rawValue
+            }
+            await loadStyleSamples()
+            await loadMessages()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        loading = false
+    }
+
+    func reload() async {
+        guard !syncing else { return }
+        syncing = true
+        defer { syncing = false }
+        // 重新发现邮箱目录（新邮件、新账户）
+        if let native = NativeMailStore() {
+            store = native
+            isDemo = false
+        }
+        await load()
+    }
+
+    // MARK: - 权限
+
+    /// 重新检测完全磁盘访问权限；成功后切到真实邮件
+    @discardableResult
+    func recheckAccess() async -> Bool {
+        guard let native = NativeMailStore() else { return false }
+        store = native
+        isDemo = false
+        showOnboarding = false
+        selectedMailboxID = nil
+        selected = nil
+        await load()
+        return true
+    }
+
+    func useDemoData() {
+        UserDefaults.standard.set(true, forKey: "mailpilot.onboarding.dismissed")
+        showOnboarding = false
+    }
+
+    func selectMailbox(_ id: String) async {
+        selectedMailboxID = id
+        selected = nil
+        aiOutput = nil
+        query = ""
+        if showAsk { syncAskScopeToSelection() }
+        await loadMessages()
+    }
+
+    func loadMessages() async {
+        guard let id = selectedMailboxID else { return }
+        do {
+            messages = try await store.messages(mailboxID: id, limit: 200)
+        } catch {
+            errorMessage = error.localizedDescription
+            messages = []
+        }
+    }
+
+    func open(_ message: Message) async {
+        selected = message
+        aiOutput = nil
+        if message.unread, let idx = messages.firstIndex(where: { $0.id == message.id }) {
+            messages[idx].unread = false
+        }
+    }
+
+    // MARK: - 搜索
+
+    func scheduleSearch() {
+        searchTask?.cancel()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else {
+            Task { await loadMessages() }
+            return
+        }
+        searchTask = Task { [q] in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let rows = try await store.search(q, limit: 80)
+                guard !Task.isCancelled else { return }
+                self.messages = rows
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    // MARK: - AI
+
+    private func context(_ m: Message) -> String {
+        """
+        发件人: \(m.sender) <\(m.senderEmail)>
+        主题: \(m.subject)
+        日期: \(m.date.formatted())
+        正文:
+        \(m.body.prefix(3000))
+        """
+    }
+
+    func summarize() {
+        guard let m = selected else { return }
+        aiBusy = true
+        aiOutput = nil
+        Task { @MainActor in
+            await self.run(prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
+                           message: m,
+                           fallback: { Self.localSummary(m) })
+        }
+    }
+
+    func draftReply(instruction: String = "") {
+        guard let m = selected else { return }
+        aiBusy = true
+        aiOutput = nil
+        Task { @MainActor in
+            let prompt = "基于这封邮件，用专业简洁的中文草拟一封回复" +
+                (instruction.isEmpty ? "" : "，要求：\(instruction)") + "。只输出回复正文。"
+            await self.run(prompt: prompt, message: m, fallback: { Self.localReply(m) })
+        }
+    }
+
+    func classify() {
+        guard let m = selected else { return }
+        aiBusy = true
+        aiOutput = nil
+        Task { @MainActor in
+            await self.run(prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
+                           message: m,
+                           fallback: { Self.localClassify(m) })
+        }
+    }
+
+    func translate() {
+        guard let m = selected else { return }
+        aiBusy = true
+        aiOutput = nil
+        let target = prefs.prefs.translateTarget
+        Task { @MainActor in
+            await self.run(prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
+                           message: m,
+                           fallback: { "（未配置模型，无法翻译）" })
+        }
+    }
+
+    /// 根据最近收件箱生成「我的简介」
+    func generateProfile() async -> String {
+        guard let provider = ai.activeProvider else {
+            return "请先在「模型服务」里配置一个可用的模型。"
+        }
+        let recent = (try? await store.messages(mailboxID: SmartBox.allInbox.rawValue, limit: 8)) ?? []
+        guard !recent.isEmpty else { return "收件箱为空，无法生成简介。" }
+
+        let ctx = recent.map {
+            "主题：\($0.subject)\n发件人：\($0.displaySender)\n\($0.body.prefix(300))"
+        }.joined(separator: "\n---\n")
+
+        do {
+            return try await AIService.chat(
+                provider: provider,
+                system: "你是一个谨慎的中文助理，只根据给定邮件推断，不要编造。",
+                user: "根据以下最近邮件，用 120 字以内写出「我的简介」：我的角色、主要工作内容、常见沟通对象。只输出简介正文。\n\n\(ctx)"
+            )
+        } catch {
+            return "生成失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func loadStyleSamples() async {
+        guard prefs.prefs.learnWritingStyle else {
+            sentSamples = []
+            return
+        }
+        let sentBoxes = mailboxes.filter { $0.role == .sent }
+        var samples: [String] = []
+        for box in sentBoxes.prefix(2) {
+            if let rows = try? await store.messages(mailboxID: box.id, limit: 2) {
+                samples.append(contentsOf: rows.map { String($0.body.prefix(400)) })
+            }
+        }
+        sentSamples = Array(samples.prefix(3))
+    }
+
+    private func run(prompt: String, message: Message, fallback: () -> String) async {
+        let system = prefs.systemPrompt(styleSamples: sentSamples)
+        guard let provider = ai.activeProvider else {
+            aiOutput = fallback() + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
+            aiBusy = false
+            return
+        }
+        do {
+            let text = try await AIService.chat(provider: provider,
+                                                system: system,
+                                                user: prompt + "\n\n" + context(message))
+            aiOutput = text
+        } catch {
+            aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n" + fallback()
+        }
+        aiBusy = false
+    }
+
+    static func localSummary(_ m: Message) -> String {
+        let sentences = m.body
+            .split(whereSeparator: { "。！？\n".contains($0) })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count > 8 }
+        var out = sentences.prefix(3).joined(separator: "；")
+        if out.isEmpty { out = String(m.body.prefix(90)) }
+        if m.needsReply { out += "\n\n需要你回复。" }
+        if !m.attachments.isEmpty {
+            out += "\n附件：" + m.attachments.map(\.filename).joined(separator: "、")
+        }
+        return out
+    }
+
+    static func localReply(_ m: Message) -> String {
+        let who = m.displaySender
+        var text = "\(who)您好，\n\n"
+        if m.subject.contains("报价") || m.subject.contains("采购") {
+            text += "收到您的需求。关于阶梯报价和账期，我们内部核算后会在本周五前给您完整方案。\n\n另确认一下：200 台的交付是否需要分批？"
+        } else if m.subject.contains("维护") {
+            text += "窗口没问题。这次会连缓存层一起重启，建议把窗口延长到 5 点，我这边同步更新维护公告。"
+        } else if m.subject.contains("合同") {
+            text += "意见收到，付款节点和违约金上限两处我们原则同意，法务确认后今天回签。"
+        } else {
+            text += "邮件收到，我这边确认后尽快回复您。"
+        }
+        return text + "\n\n祝好"
+    }
+
+    static func localClassify(_ m: Message) -> String {
+        let s = m.subject
+        var category = "其他"
+        let table: [(String, String)] = [
+            ("报价", "商务"), ("合同", "商务"), ("采购", "商务"),
+            ("体检", "行政"), ("维护", "系统通知"), ("Issue", "订阅资讯"),
+            ("招聘", "人事"), ("存储", "系统通知"), ("阅读", "订阅资讯"),
+            ("账单", "财务"), ("订阅", "财务"), ("登录", "系统通知"),
+        ]
+        for (k, v) in table where s.contains(k) { category = v; break }
+        let priority = m.needsReply ? "高" : "低"
+        return "分类：\(category)\n优先级：\(priority)\n需回复：\(m.needsReply ? "是" : "否")"
+    }
+
+    // MARK: - 删除（永不自动执行，必须二次确认）
+
+    func requestDelete(_ message: Message) {
+        pendingDelete = message
+        showDeleteConfirm = true
+    }
+
+    func confirmDelete() async {
+        guard let target = pendingDelete else { return }
+        do {
+            try await store.delete(id: target.id)
+            if selected?.id == target.id { selected = nil }
+            messages.removeAll { $0.id == target.id }
+            badges = (try? await store.badgeCounts()) ?? badges
+            mailboxes = (try? await store.mailboxes()) ?? mailboxes
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        pendingDelete = nil
+    }
+
+    // MARK: - 外观
+
+    func cycleAppearance() {
+        appearance = appearance.next
+    }
+
+    func toggleSection(_ key: String) {
+        if collapsedSections.contains(key) {
+            collapsedSections.remove(key)
+        } else {
+            collapsedSections.insert(key)
+        }
+    }
+
+    // MARK: - 浮动提问框
+
+    var askSuggestions: [String] {
+        prefs.prefs.suggestionList
+    }
+
+    func toggleAsk() {
+        if showAsk {
+            closeAsk()
+            return
+        }
+        showAsk = true
+        syncAskScopeToSelection()
+    }
+
+    /// 每次打开浮动框，按当前侧边栏选中项重置范围：
+    /// 智能邮箱（所有收件箱/今天…）→ 所有账号；某个账号的邮箱 → 只勾该账号
+    func syncAskScopeToSelection() {
+        if let active = activeAccountID {
+            askAllAccounts = false
+            askAccounts = [active]
+        } else {
+            askAllAccounts = true
+            askAccounts = []
+        }
+    }
+
+    func closeAsk() {
+        showAsk = false
+        askText = ""
+        askSelectMode = false
+        askSelected = []
+    }
+
+    func ask() {
+        let question = askText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !question.isEmpty, !askBusy else { return }
+
+        guard let provider = ai.activeProvider else {
+            appendAsk(question: question, answer: "还没有配置模型。点右上角齿轮 →「模型服务」添加一个。")
+            return
+        }
+
+        askBusy = true
+        askText = ""
+
+        let allAccounts = askAllAccounts
+        let targets = allAccounts ? accounts.map(\.id) : Array(askAccounts)
+        let scopeText = allAccounts
+            ? "所有账号（\(targets.count) 个）"
+            : "已选账号：" + accounts.filter { targets.contains($0.id) }.map(\.name).joined(separator: "、")
+        let scopeNames = allAccounts ? ["所有账号"] : accounts.filter { targets.contains($0.id) }.map(\.name)
+
+        let turn = AskTurn(question: question, answer: "", accounts: scopeNames)
+        askHistory.append(turn)
+        persistAsk()
+
+        Task { @MainActor in
+            guard !targets.isEmpty else {
+                self.finishAsk(turn.id, answer: "还没有选择账号。点左下角选一个，或选「所有账号」。")
+                return
+            }
+
+            var collected: [Message] = []
+            for accountID in targets {
+                let inboxes = mailboxes.filter { $0.accountID == accountID && $0.role == .inbox }
+                for box in inboxes {
+                    let rows = (try? await store.messages(mailboxID: box.id, limit: 6)) ?? []
+                    collected.append(contentsOf: rows)
+                }
+            }
+            collected = Array(collected.prefix(15))
+
+            guard !collected.isEmpty else {
+                self.finishAsk(turn.id, answer: "选中的账号里没有邮件。")
+                return
+            }
+
+            let context = collected.map { message in
+                let account = accounts.first { $0.id == message.accountID }?.name ?? ""
+                return "· [\(account)] \(message.displaySender)｜\(message.subject)｜\(message.date.formatted(date: .numeric, time: .shortened))\n  \(message.preview)"
+            }.joined(separator: "\n")
+
+            let prompt = """
+            操作范围：\(scopeText)
+            邮件内容（\(collected.count) 封）：
+            \(context)
+
+            用户问题：\(question)
+            """
+
+            do {
+                let text = try await AIService.chat(
+                    provider: provider,
+                    system: prefs.systemPrompt(styleSamples: sentSamples),
+                    user: prompt
+                )
+                self.finishAsk(turn.id, answer: text)
+            } catch {
+                self.finishAsk(turn.id, answer: "调用失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func appendAsk(question: String, answer: String) {
+        askHistory.append(AskTurn(question: question, answer: answer))
+        persistAsk()
+    }
+
+    private func finishAsk(_ id: String, answer: String) {
+        if let index = askHistory.firstIndex(where: { $0.id == id }) {
+            askHistory[index].answer = answer
+        }
+        persistAsk()
+        askBusy = false
+    }
+
+    // MARK: - 历史记录
+
+    private func loadAskHistory() {
+        guard let data = UserDefaults.standard.data(forKey: askStorageKey),
+              let decoded = try? JSONDecoder().decode([AskTurn].self, from: data) else { return }
+        askHistory = decoded
+    }
+
+    private func persistAsk() {
+        if askHistory.count > 200 {
+            askHistory = Array(askHistory.suffix(200))
+        }
+        if let data = try? JSONEncoder().encode(askHistory) {
+            UserDefaults.standard.set(data, forKey: askStorageKey)
+        }
+    }
+
+    func deleteAskTurn(_ id: String) {
+        askHistory.removeAll { $0.id == id }
+        askSelected.remove(id)
+        persistAsk()
+    }
+
+    func toggleAskSelect(_ id: String) {
+        if askSelected.contains(id) {
+            askSelected.remove(id)
+        } else {
+            askSelected.insert(id)
+        }
+    }
+
+    func deleteSelectedAsks() {
+        askHistory.removeAll { askSelected.contains($0.id) }
+        askSelected = []
+        askSelectMode = false
+        persistAsk()
+    }
+
+    func clearAskHistory() {
+        askHistory = []
+        askSelected = []
+        askSelectMode = false
+        persistAsk()
+    }
+
+    var activeAccountID: String? {
+        guard let id = selectedMailboxID else { return nil }
+        if SmartBox(rawValue: id) != nil { return nil }
+        return mailboxes.first { $0.id == id }?.accountID
+    }
+
+    var askScopeTitle: String {
+        if askAllAccounts { return "所有账号" }
+        let names = accounts.filter { askAccounts.contains($0.id) }.map(\.name)
+        if names.isEmpty { return "选择账号" }
+        if names.count == 1 { return names[0] }
+        return "\(names.count) 个账号"
+    }
+
+    /// 胶囊里逐行展示的名称
+    var askScopeNames: [String] {
+        if askAllAccounts { return ["所有账号"] }
+        let names = accounts.filter { askAccounts.contains($0.id) }.map(\.name)
+        return names.isEmpty ? ["选择账号"] : names
+    }
+
+    func toggleAskAccount(_ id: String) {
+        askAllAccounts = false
+        if askAccounts.contains(id) {
+            askAccounts.remove(id)
+        } else {
+            askAccounts.insert(id)
+        }
+    }
+
+    func toggleAllAccounts() {
+        askAllAccounts.toggle()
+        // 「所有账号」是独立选项，不往下面的多选里塞 ID
+        if askAllAccounts {
+            askAccounts = []
+        }
+    }
+}
