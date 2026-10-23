@@ -71,6 +71,7 @@ final class AppModel: ObservableObject {    // 数据
     @Published var pendingDelete: Message?
     @Published var showDeleteConfirm = false
     @Published var showOnboarding = false
+    @Published var showAbout = false
 
     // 浮动提问框
     @Published var showAsk = false

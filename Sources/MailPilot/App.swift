@@ -17,6 +17,15 @@ struct MailPilotApp: App {
                 Button("写邮件") { model.composing = true }
                     .keyboardShortcut("n", modifiers: .command)
             }
+            CommandGroup(replacing: .appInfo) {
+                Button("关于 MailPilot") { model.showAbout = true }
+            }
+
+            CommandGroup(after: .appSettings) {
+                Button("设置…") { model.showSettings = true }
+                    .keyboardShortcut(",", modifiers: .command)
+            }
+
             CommandGroup(after: .toolbar) {
                 Button("问问 AI") { model.toggleAsk() }
                     .keyboardShortcut("k", modifiers: .command)

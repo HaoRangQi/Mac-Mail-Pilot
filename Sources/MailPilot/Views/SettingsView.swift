@@ -1,12 +1,15 @@
 import SwiftUI
 
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case providers, features
+    case permissions
+    case providers
+    case features
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
+        case .permissions: return "权限管理"
         case .providers: return "模型服务"
         case .features: return "AI 功能"
         }
@@ -31,6 +34,7 @@ final class SettingsForm: ObservableObject {
 
 struct SettingsView: View {
     @EnvironmentObject private var ai: AISettingsStore
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var form = SettingsForm()
 
@@ -49,9 +53,16 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 210)
+                .frame(width: 320)
 
                 Spacer()
+
+                Button("关于") {
+                    model.showAbout = true
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
 
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -64,6 +75,8 @@ struct SettingsView: View {
             Divider().opacity(0.6)
 
             switch form.tab {
+            case .permissions:
+                PermissionView()
             case .providers:
                 HStack(spacing: 0) {
                     providerList

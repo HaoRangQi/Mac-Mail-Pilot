@@ -33,6 +33,10 @@ struct RootView: View {
                     .transition(.opacity)
             }
         }
+        .sheet(isPresented: $model.showAbout) {
+            AboutView()
+                .environmentObject(model)
+        }
         .animation(.easeOut(duration: 0.16), value: model.showAsk)
         .preferredColorScheme(model.appearance.colorScheme)
         .task { await model.load() }
