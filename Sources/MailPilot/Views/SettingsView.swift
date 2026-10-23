@@ -1,21 +1,5 @@
 import SwiftUI
 
-enum SettingsTab: String, CaseIterable, Identifiable {
-    case permissions
-    case providers
-    case features
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .permissions: return "权限管理"
-        case .providers: return "模型服务"
-        case .features: return "AI 功能"
-        }
-    }
-}
-
 enum SettingsSheet: String, Identifiable {
     case add, keys, test, models, addModel
     var id: String { rawValue }
@@ -28,7 +12,6 @@ final class SettingsForm: ObservableObject {
     @Published var status: String?
     @Published var busy = false
     @Published var activeSheet: SettingsSheet?
-    @Published var tab: SettingsTab = .providers
     @Published var pendingDeleteID: String?
 }
 
@@ -46,23 +29,16 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Picker("", selection: $form.tab) {
+                Picker("", selection: $model.settingsTab) {
                     ForEach(SettingsTab.allCases) { tab in
                         Text(tab.title).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 320)
+                .frame(width: 400)
 
                 Spacer()
-
-                Button("关于") {
-                    model.showAbout = true
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
 
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.cancelAction)
@@ -74,7 +50,7 @@ struct SettingsView: View {
 
             Divider().opacity(0.6)
 
-            switch form.tab {
+            switch model.settingsTab {
             case .permissions:
                 PermissionView()
             case .providers:
@@ -87,6 +63,8 @@ struct SettingsView: View {
                 }
             case .features:
                 AIFeaturesView()
+            case .about:
+                AboutView()
             }
         }
         .frame(width: 820, height: 660)

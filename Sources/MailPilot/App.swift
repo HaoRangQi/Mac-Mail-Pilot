@@ -18,11 +18,11 @@ struct MailPilotApp: App {
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(replacing: .appInfo) {
-                Button("关于 MailPilot") { model.showAbout = true }
+                Button("关于 MailPilot") { model.openSettings(tab: .about) }
             }
 
             CommandGroup(after: .appSettings) {
-                Button("设置…") { model.showSettings = true }
+                Button("设置…") { model.openSettings() }
                     .keyboardShortcut(",", modifiers: .command)
             }
 

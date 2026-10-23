@@ -41,6 +41,24 @@ enum Appearance: String, CaseIterable, Identifiable {
     }
 }
 
+enum SettingsTab: String, CaseIterable, Identifiable {
+    case permissions
+    case providers
+    case features
+    case about
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .permissions: return "权限管理"
+        case .providers: return "模型服务"
+        case .features: return "AI 功能"
+        case .about: return "关于"
+        }
+    }
+}
+
 struct AskTurn: Identifiable, Codable, Hashable {
     var id: String = UUID().uuidString
     var question: String
@@ -71,7 +89,14 @@ final class AppModel: ObservableObject {    // 数据
     @Published var pendingDelete: Message?
     @Published var showDeleteConfirm = false
     @Published var showOnboarding = false
-    @Published var showAbout = false
+
+    // 设置
+    @Published var settingsTab: SettingsTab = .permissions
+
+    func openSettings(tab: SettingsTab = .permissions) {
+        settingsTab = tab
+        showSettings = true
+    }
 
     // 浮动提问框
     @Published var showAsk = false
