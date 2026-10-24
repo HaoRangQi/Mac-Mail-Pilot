@@ -639,6 +639,9 @@ final class AppModel: ObservableObject {    // 数据
     /// 待用户确认的工具调用（破坏性操作）
     @Published var pendingToolCall: ToolCall?
 
+    /// 确认挂起时的续体。工具调用闭包会 await 在这里，直到用户在弹框上点确认或取消
+    private var toolConfirmContinuation: CheckedContinuation<Bool, Never>?
+
     /// 当前模型能否使用某工具。
     /// 只读任何模型可用；写入与破坏性一律先确认——「AI 只找不删」的边界在这里守住。
     func toolPermission(_ tool: MailTool) -> (allowed: Bool, needsConfirm: Bool) {
@@ -650,8 +653,25 @@ final class AppModel: ObservableObject {    // 数据
         }
     }
 
+    /// 用户在弹框上的选择。resume 挂起中的工具调用，让 AI 拿到结果后继续
+    func resolveToolConfirmation(_ approved: Bool) {
+        toolConfirmContinuation?.resume(returning: approved)
+        toolConfirmContinuation = nil
+        if !approved { pendingToolCall = nil }
+    }
+
     /// 执行一次工具调用，返回给模型看的文本结果
     func executeToolCall(_ call: ToolCall) async -> String {
+        // 非只读工具一律先问人。删除虽只是进废纸篓、可恢复，也必须由用户点头
+        if call.tool.risk != .read {
+            pendingToolCall = call
+            let approved = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+                self.toolConfirmContinuation = continuation
+            }
+            pendingToolCall = nil
+            guard approved else { return "用户取消了这次操作，没有执行" }
+        }
+
         switch call.tool {
         case .searchMessages:
             let query = (call.arguments["query"] as? String ?? "")
@@ -712,8 +732,7 @@ final class AppModel: ObservableObject {    // 数据
 
         case .markRead, .setFlag, .saveDraft, .sendMessage:
             return "工具「\(call.tool.rawValue)」尚未开放。标记已读、旗标、存草稿、发送请在界面上手动完成。"
-        }
-    }
+        }    }
 
     /// 带工具的问答入口
     func askWithTools(_ question: String) async {
@@ -735,7 +754,9 @@ final class AppModel: ObservableObject {    // 数据
         - 需要邮件信息时，先 searchMessages 拿 ID，再 getMessage 读正文
         - 回答用简体中文，直接、具体，不要客套
         - 不知道就说不知道，不要编造邮件内容
-        - 涉及删除、发送等破坏性操作，明确告诉用户需要他本人确认，不要声称已经执行
+        - 删除、发送等操作**必须由用户确认后才能执行**。你请求之后系统会弹框问用户，
+          在收到「已执行」之前绝对不要说「已经删除/已经发送」
+        - moveToTrash 只是移入废纸篓，可以恢复，但仍需用户点头
         """
 
         do {

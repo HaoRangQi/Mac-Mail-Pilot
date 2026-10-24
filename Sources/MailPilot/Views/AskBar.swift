@@ -36,6 +36,29 @@ struct AskBar: View {
         .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
         .onExitCommand { model.closeAsk() }
         .onAppear { focused = true }
+        .alert(
+            "确认执行这个操作？",
+            isPresented: Binding(
+                get: { model.pendingToolCall != nil },
+                set: { presented in if !presented { model.resolveToolConfirmation(false) } }
+            )
+        ) {
+            Button("确认执行", role: .destructive) {
+                model.resolveToolConfirmation(true)
+            }
+            Button("取消", role: .cancel) {
+                model.resolveToolConfirmation(false)
+            }
+        } message: {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(model.pendingToolCall?.humanSummary ?? "")
+                if model.pendingToolCall?.tool == .moveToTrash {
+                    Text("只是移入「邮件」App 的废纸篓，可以在那里恢复。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
         .confirmationDialog("清空全部对话记录？", isPresented: $ui.showClearConfirm) {
             Button("清空", role: .destructive) { model.clearAskHistory() }
             Button("取消", role: .cancel) {}
