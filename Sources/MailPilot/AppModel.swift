@@ -90,6 +90,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var showSettings = false
     @Published var pendingDelete: Message?
     @Published var showDeleteConfirm = false
+    /// 删除执行中（全库扫描兜底可能耗时，界面需要给出反馈）
+    @Published var deleting = false
     @Published var showOnboarding = false
 
     // 设置
@@ -449,6 +451,8 @@ final class AppModel: ObservableObject {    // 数据
         guard let target = pendingDelete else { return }
         pendingDelete = nil
         showDeleteConfirm = false
+        deleting = true
+        defer { deleting = false }
         do {
             try await store.moveToTrash(target)
             if selected?.id == target.id { selected = nil }

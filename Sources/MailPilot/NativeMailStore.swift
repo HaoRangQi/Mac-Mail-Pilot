@@ -101,6 +101,7 @@ final class NativeMailStore: MailStore {
             throw MailMutatorError.notFound("找不到这封邮件所在的邮箱")
         }
         try await MailMutator.moveToTrash(
+            accountID: message.accountID,
             accountName: accountDisplayName(message.accountID),
             accountEmail: accountEmail(message.accountID),
             mailboxName: box.rawName,

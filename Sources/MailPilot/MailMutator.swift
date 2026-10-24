@@ -29,64 +29,122 @@ enum MailMutatorError: LocalizedError {
 /// 外部搬文件它不会知道，界面也不会更新。
 enum MailMutator {
 
-    /// 账户定位三级回退：Accounts.plist 的名字 → 邮箱地址 → 唯一账户
-    /// 消息定位两级回退：指定邮箱 → 扫描账户下所有邮箱
+    /// 账户定位四级回退：账户 id（UUID）→ 名称 → 邮箱地址 → 唯一账户
+    /// 消息定位两级回退：指定邮箱 → 账户下所有邮箱；最后全库按 Message-ID 兜底
     /// 删除动作两级回退：`delete`（原生，自动进废纸篓）→ 显式 move 到废纸篓邮箱
-    static func moveToTrash(accountName: String,
+    static func moveToTrash(accountID: String,
+                            accountName: String,
                             accountEmail: String,
                             mailboxName: String,
                             messageID: String) async throws {
         let script = """
         tell application "Mail"
-            set acct to missing value
-            try
-                set acct to first account whose name = "\(escape(accountName))"
-            end try
-            if acct is missing value and "\(escape(accountEmail))" is not "" then
-                repeat with a in accounts
+            set theMsgId to "\(escape(messageID))"
+            set acctIdx to 0
+
+            -- 1. 按账户 id（通常是 Mail 目录的 UUID）匹配，最精确
+            repeat with i from 1 to (count of accounts)
+                try
+                    if (id of account i as string) is "\(escape(accountID))" then
+                        set acctIdx to i
+                        exit repeat
+                    end if
+                end try
+            end repeat
+
+            -- 2. 按账户显示名匹配
+            if acctIdx is 0 then
+                repeat with i from 1 to (count of accounts)
                     try
-                        repeat with e in (email addresses of a)
-                            if (e as string) contains "\(escape(accountEmail))" then set acct to a
+                        if (name of account i as string) is "\(escape(accountName))" then
+                            set acctIdx to i
+                            exit repeat
+                        end if
+                    end try
+                end repeat
+            end if
+
+            -- 3. 按邮箱地址匹配
+            if acctIdx is 0 and "\(escape(accountEmail))" is not "" then
+                repeat with i from 1 to (count of accounts)
+                    try
+                        repeat with e in (email addresses of account i)
+                            if (e as string) contains "\(escape(accountEmail))" then
+                                set acctIdx to i
+                                exit repeat
+                            end if
                         end repeat
                     end try
+                    if acctIdx > 0 then exit repeat
                 end repeat
             end if
-            if acct is missing value and (count of accounts) is 1 then set acct to first account
-            if acct is missing value then return "ERROR: 找不到对应的邮件账户"
+
+            -- 4. 只有一个账户时直接用它
+            if acctIdx is 0 and (count of accounts) is 1 then set acctIdx to 1
 
             set m to missing value
-            try
-                set m to first message of mailbox "\(escape(mailboxName))" of acct whose message id = "\(escape(messageID))"
-            end try
-            if m is missing value then
-                repeat with mb in mailboxes of acct
-                    try
-                        set m to first message of mb whose message id = "\(escape(messageID))"
+
+            -- 在定位到的账户里找：先指定邮箱，再扫该账户所有邮箱
+            if acctIdx > 0 then
+                set acct to account acctIdx
+                try
+                    set m to first message of mailbox "\(escape(mailboxName))" of acct whose message id is theMsgId
+                end try
+                if m is missing value then
+                    repeat with j from 1 to (count of mailboxes of acct)
+                        try
+                            set m to first message of mailbox j of acct whose message id is theMsgId
+                        end try
                         if m is not missing value then exit repeat
-                    end try
+                    end repeat
+                end if
+            end if
+
+            -- 5. 最后兜底：不依赖账户定位，全库按 Message-ID 扫一遍
+            if m is missing value then
+                repeat with i from 1 to (count of accounts)
+                    set a2 to account i
+                    repeat with j from 1 to (count of mailboxes of a2)
+                        try
+                            set m to first message of mailbox j of a2 whose message id is theMsgId
+                        end try
+                        if m is not missing value then exit repeat
+                    end repeat
+                    if m is not missing value then exit repeat
                 end repeat
             end if
-            if m is missing value then return "ERROR: 在「邮件」App 里找不到这封邮件，可能已被移动或删除"
+
+            set acctFound to "失败"
+            if acctIdx > 0 then set acctFound to "成功"
+            if m is missing value then
+                return "ERROR: 在「邮件」App 里找不到这封邮件（账户定位" & acctFound & "），可能已被移动或删除"
+            end if
 
             try
                 delete m
                 return "OK"
             on error delErr
-                set trashBox to missing value
-                repeat with mb in mailboxes of acct
-                    set mbName to name of mb as string
-                    if mbName is "Trash" or mbName is "Deleted Messages" or mbName is "Bin" or mbName is "Deleted Items" then
-                        set trashBox to mb
-                        exit repeat
-                    end if
-                    if mbName is "已删除邮件" or mbName is "已删除" or mbName is "废纸篓" then
-                        set trashBox to mb
-                        exit repeat
-                    end if
-                end repeat
-                if trashBox is missing value then return "ERROR: " & (delErr as string)
-                move m to trashBox
-                return "OK"
+                try
+                    set mAcct to account of m
+                    set trashBox to missing value
+                    repeat with j from 1 to (count of mailboxes of mAcct)
+                        set mb to mailbox j of mAcct
+                        set mbName to name of mb as string
+                        if mbName is "Trash" or mbName is "Deleted Messages" or mbName is "Bin" or mbName is "Deleted Items" then
+                            set trashBox to mb
+                            exit repeat
+                        end if
+                        if mbName is "已删除邮件" or mbName is "已删除" or mbName is "废纸篓" then
+                            set trashBox to mb
+                            exit repeat
+                        end if
+                    end repeat
+                    if trashBox is missing value then return "ERROR: " & (delErr as string)
+                    move m to trashBox
+                    return "OK"
+                on error
+                    return "ERROR: " & (delErr as string)
+                end try
             end try
         end tell
         """

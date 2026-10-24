@@ -146,7 +146,9 @@ struct ReaderView: View {
                 if model.aiBusy {
                     ProgressView().controlSize(.small)
                 }
-                if let message = model.selected {
+                if model.deleting {
+                    ProgressView().controlSize(.small)
+                } else if let message = model.selected {
                     Button {
                         model.requestDelete(message)
                     } label: {
