@@ -80,10 +80,6 @@ final class NativeMailStore: MailStore {
         return results
     }
 
-    func delete(id: String) async throws {
-        // 真实删除走「邮件」App，这里暂不实现
-    }
-
     func badgeCounts() async throws -> [String: Int] {
         var counts: [String: Int] = [:]
         counts[SmartBox.allInbox.rawValue] = boxes.filter { $0.role == .inbox }.reduce(0) { $0 + fileCount(in: $1) }

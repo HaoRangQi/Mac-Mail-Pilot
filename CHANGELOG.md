@@ -2,6 +2,12 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.2] - 2026-10-24
+
+### 移除
+
+- **邮件删除功能**（阅读页垃圾桶按钮 + 二次确认弹框）：原实现只把邮件从内存列表移除，并未真正移入「邮件」App 的废纸篓，刷新后即复原，属于误导性功能，故整体移除。涉及的 `requestDelete` / `confirmDelete`、`MailStore.delete(id:)` 协议方法与两个 Store 的实现一并删除
+
 ## [0.2.1] - 2026-10-23
 
 ### 新增

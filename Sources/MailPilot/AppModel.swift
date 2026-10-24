@@ -86,8 +86,6 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiBusy = false
     @Published var composing = false
     @Published var showSettings = false
-    @Published var pendingDelete: Message?
-    @Published var showDeleteConfirm = false
     @Published var showOnboarding = false
 
     // 设置
@@ -410,27 +408,6 @@ final class AppModel: ObservableObject {    // 数据
         for (k, v) in table where s.contains(k) { category = v; break }
         let priority = m.needsReply ? "高" : "低"
         return "分类：\(category)\n优先级：\(priority)\n需回复：\(m.needsReply ? "是" : "否")"
-    }
-
-    // MARK: - 删除（永不自动执行，必须二次确认）
-
-    func requestDelete(_ message: Message) {
-        pendingDelete = message
-        showDeleteConfirm = true
-    }
-
-    func confirmDelete() async {
-        guard let target = pendingDelete else { return }
-        do {
-            try await store.delete(id: target.id)
-            if selected?.id == target.id { selected = nil }
-            messages.removeAll { $0.id == target.id }
-            badges = (try? await store.badgeCounts()) ?? badges
-            mailboxes = (try? await store.mailboxes()) ?? mailboxes
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        pendingDelete = nil
     }
 
     // MARK: - 外观

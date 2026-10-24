@@ -62,7 +62,6 @@ protocol MailStore: AnyObject {
     func messages(mailboxID: String, limit: Int) async throws -> [Message]
     func message(id: String) async throws -> Message?
     func search(_ query: String, limit: Int) async throws -> [Message]
-    func delete(id: String) async throws
     /// 侧边栏「个人收藏」与「智能邮箱」的角标
     func badgeCounts() async throws -> [String: Int]
 }

@@ -14,18 +14,6 @@ struct ReaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .glassPanel()
-        .confirmationDialog(
-            "删除这封邮件？",
-            isPresented: $model.showDeleteConfirm,
-            presenting: model.pendingDelete
-        ) { message in
-            Button("删除邮件", role: .destructive) {
-                Task { await model.confirmDelete() }
-            }
-            Button("取消", role: .cancel) {}
-        } message: { message in
-            Text("「\(message.subject)」\n删除操作只在你确认后执行。")
-        }
     }
 
     private var emptyState: some View {
@@ -143,20 +131,6 @@ struct ReaderView: View {
                 Spacer()
                 if model.aiBusy {
                     ProgressView().controlSize(.small)
-                }
-                if let message = model.selected {
-                    Button {
-                        model.requestDelete(message)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.red)
-                            .frame(width: 27, height: 27)
-                            .background(Color.red.opacity(0.10), in: Circle())
-                            .overlay(Circle().stroke(Color.red.opacity(0.20), lineWidth: 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .help("删除（需要二次确认）")
                 }
             }
 

@@ -335,11 +335,6 @@ final class DemoStore: MailStore {
         }.sorted { $0.date > $1.date }.prefix(limit).map { $0 }
     }
 
-    func delete(id: String) async throws {
-        all.removeAll { $0.id == id }
-        refreshCounts()
-    }
-
     func badgeCounts() async throws -> [String: Int] {
         var out: [String: Int] = [:]
         for box in SmartBox.allCases {
