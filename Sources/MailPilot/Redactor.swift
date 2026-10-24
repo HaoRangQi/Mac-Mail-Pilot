@@ -17,9 +17,18 @@ struct Redactor {
         let original: String
     }
 
+    /// 供设置页展示的规则信息（内部 Rule 结构不外泄）
+    struct RuleInfo: Identifiable {
+        let name: String
+        let hint: String
+        let pattern: String
+        var id: String { name }
+    }
+
     private struct Rule {
         let name: String
         let pattern: String
+        let hint: String
     }
 
     /// 规则表按「长模式优先」排列：18 位身份证必须比 16 位银行卡先匹配，
@@ -28,22 +37,26 @@ struct Redactor {
     /// 全部用前后断言而不是 `\b`：`\b` 是 ASCII 词边界，
     /// 「电话13800138000」这种前后紧贴汉字的情况 `\b` 根本匹配不上。
     private static let rules: [Rule] = [
-        Rule(name: "身份证", pattern: "(?<![0-9])[0-9]{17}[0-9Xx](?![0-9])"),
-        Rule(name: "银行卡", pattern: "(?<![0-9])[0-9]{16,19}(?![0-9])"),
-        Rule(name: "手机号", pattern: "(?<![0-9])1[3-9][0-9]{9}(?![0-9])"),
-        Rule(name: "IP", pattern: "(?<![0-9.])[0-9]{1,3}(?:\\.[0-9]{1,3}){3}(?![0-9.])"),
-        Rule(name: "邮箱", pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+"),
-        Rule(name: "金额", pattern: "[¥￥$]\\s?[0-9][0-9,.]*|[0-9][0-9,.]{2,}\\s?(?:万元|元|块)"),
+        Rule(name: "身份证", pattern: "(?<![0-9])[0-9]{17}[0-9Xx](?![0-9])", hint: "18 位身份证号（含末位 X）"),
+        Rule(name: "银行卡", pattern: "(?<![0-9])[0-9]{16,19}(?![0-9])", hint: "16-19 位数字，长订单号可能被误伤"),
+        Rule(name: "手机号", pattern: "(?<![0-9])1[3-9][0-9]{9}(?![0-9])", hint: "11 位手机号"),
+        Rule(name: "IP", pattern: "(?<![0-9.])[0-9]{1,3}(?:\\.[0-9]{1,3}){3}(?![0-9.])", hint: "IPv4 地址"),
+        Rule(name: "邮箱", pattern: "[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+", hint: "电子邮箱地址"),
+        Rule(name: "金额", pattern: "[¥￥$]\\s?[0-9][0-9,.]*|[0-9][0-9,.]{2,}\\s?(?:万元|元|块)", hint: "带货币符号或中文单位的金额"),
     ]
+
+    static var ruleInfos: [RuleInfo] {
+        rules.map { RuleInfo(name: $0.name, hint: $0.hint, pattern: $0.pattern) }
+    }
 
     // MARK: - 脱敏
 
-    static func redact(_ text: String) -> (text: String, mappings: [Mapping]) {
+    static func redact(_ text: String, disabledRules: Set<String> = []) -> (text: String, mappings: [Mapping]) {
         var output = text
         var mappings: [Mapping] = []
         var counters: [String: Int] = [:]
 
-        for rule in rules {
+        for rule in rules where !disabledRules.contains(rule.name) {
             guard let regex = try? NSRegularExpression(pattern: rule.pattern) else { continue }
             let matches = regex.matches(in: output, range: NSRange(output.startIndex..., in: output))
 

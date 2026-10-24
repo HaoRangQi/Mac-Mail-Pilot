@@ -38,6 +38,26 @@ struct AIPreferences: Codable {
     /// 浮动提问框上方的建议，可选（旧配置无此字段）
     var askSuggestions: [String]? = nil
 
+    // MARK: - 隐私与数据外发
+
+    /// 不可信模型时各动作的处置。键为 `AIAction.rawValue`，缺省走内置默认
+    var untrustedPolicy: [String: UntrustedPolicy] = [:]
+
+    /// 脱敏规则开关。键为规则名，`false` 表示关闭；缺省视为开启
+    var redactionRules: [String: Bool] = [:]
+
+    /// 总开关：只要用了不可信模型，无论什么动作都先弹确认
+    var alwaysConfirmUntrusted = false
+
+    /// 关闭的脱敏规则名集合
+    var disabledRedactionRules: Set<String> {
+        Set(redactionRules.filter { !$0.value }.keys)
+    }
+
+    func untrustedPolicy(for action: AIAction) -> UntrustedPolicy {
+        untrustedPolicy[action.rawValue] ?? PrivacyDefaults.policy(for: action)
+    }
+
     static let defaultSuggestions = [
         "今天有哪些邮件需要我回复？",
         "总结一下当前邮箱的重点",
@@ -54,6 +74,35 @@ struct AIPreferences: Codable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         return custom.isEmpty ? Self.defaultSuggestions : custom
+    }
+}
+
+/// 不可信模型上某个动作的处置方式
+enum UntrustedPolicy: String, Codable, CaseIterable, Identifiable {
+    case allow = "放行"
+    case redact = "脱敏后放行"
+    case confirm = "每次确认"
+    case deny = "禁止"
+
+    var id: String { rawValue }
+
+    var hint: String {
+        switch self {
+        case .allow: return "内容原样发送，不脱敏、不确认"
+        case .redact: return "发送前自动脱敏，按下方规则替换敏感信息"
+        case .confirm: return "每次发送前弹框，列出目标服务商、字符数与脱敏项"
+        case .deny: return "在不可信模型上直接拒绝执行"
+        }
+    }
+}
+
+/// 内置默认策略。`TrustPolicy` 是唯一决策来源，这里是它的缺省值
+enum PrivacyDefaults {
+    static func policy(for action: AIAction) -> UntrustedPolicy {
+        switch action {
+        case .summarize, .classify: return .redact
+        case .reply, .translate: return .confirm
+        }
     }
 }
 

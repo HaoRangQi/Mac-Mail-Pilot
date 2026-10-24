@@ -44,6 +44,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 enum SettingsTab: String, CaseIterable, Identifiable {
     case permissions
     case providers
+    case privacy
     case features
     case about
 
@@ -53,6 +54,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .permissions: return "权限管理"
         case .providers: return "模型服务"
+        case .privacy: return "隐私与数据"
         case .features: return "AI 功能"
         case .about: return "关于"
         }
@@ -61,11 +63,20 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 /// 阅读页 AI 动作类型。决定生成结果下方给哪些操作按钮：
 /// 摘要 / 分类只要复制；只有回复才需要编辑、存草稿、发送。
-enum AIAction: Hashable {
+enum AIAction: String, Hashable {
     case summarize
     case reply
     case classify
     case translate
+
+    var label: String {
+        switch self {
+        case .summarize: return "AI 摘要"
+        case .reply: return "草拟回复"
+        case .classify: return "分类"
+        case .translate: return "翻译"
+        }
+    }
 }
 
 struct AskTurn: Identifiable, Codable, Hashable {
@@ -427,7 +438,10 @@ final class AppModel: ObservableObject {    // 数据
             return
         }
 
-        let decision = TrustPolicy.decide(action: action, provider: provider, model: provider.selectedModel)
+        let decision = TrustPolicy.decide(action: action,
+                                          provider: provider,
+                                          model: provider.selectedModel,
+                                          prefs: prefs.prefs)
         if case .deny(let reason) = decision {
             aiOutput = "已拒绝：\(reason)"
             return
@@ -438,7 +452,7 @@ final class AppModel: ObservableObject {    // 数据
         var mappings: [Redactor.Mapping] = []
 
         if decision.needsRedaction {
-            let redacted = Redactor.redact(user)
+            let redacted = Redactor.redact(user, disabledRules: prefs.prefs.disabledRedactionRules)
             user = redacted.text
             mappings = redacted.mappings
         }

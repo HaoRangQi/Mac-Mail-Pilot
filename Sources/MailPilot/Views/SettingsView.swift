@@ -62,6 +62,8 @@ struct SettingsView: View {
                     detail
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
+            case .privacy:
+                PrivacySettingsView()
             case .features:
                 AIFeaturesView()
             case .about:

@@ -28,40 +28,38 @@ enum TrustPolicy {
 
     /// 动作 × 信任级别 → 决策。这是唯一的事实来源。
     ///
-    /// 设计取向：
-    /// - 只读类（摘要 / 分类）风险低，不可信模型允许用，但内容必须脱敏
-    /// - 会产生对外内容类（回复 / 翻译）风险高，不可信模型每次都要人确认
-    /// - 可信模型一律放行，不做额外打扰
-    private static let table: [AIAction: (trusted: Decision, untrusted: Decision)] = [
-        .summarize: (.allow, .redact),
-        .classify: (.allow, .redact),
-        .reply: (.allow, .confirm),
-        .translate: (.allow, .confirm),
-    ]
+    /// 用户可在「设置 → 隐私与数据」里覆盖每个动作在不可信模型上的处置，
+    /// 未覆盖时走 `PrivacyDefaults`：只读类（摘要/分类）脱敏，会产生对外
+    /// 内容的（草拟回复/翻译）每次确认。
+    static func decide(action: AIAction, trusted: Bool, prefs: AIPreferences) -> Decision {
+        guard !trusted else { return .allow }
 
-    static func decide(action: AIAction, trusted: Bool) -> Decision {
-        guard let rule = table[action] else {
-            // 未登记的动作按最保守处理
-            return trusted ? .allow : .confirm
+        // 总开关优先：开了就一律先确认
+        if prefs.alwaysConfirmUntrusted { return .confirm }
+
+        switch prefs.untrustedPolicy(for: action) {
+        case .allow: return .allow
+        case .redact: return .redact
+        case .confirm: return .confirm
+        case .deny: return .deny("「\(action.label)」已被你在隐私设置中禁止用于不可信模型")
         }
-        return trusted ? rule.trusted : rule.untrusted
     }
 
-    static func decide(action: AIAction, provider: AIProvider, model: String) -> Decision {
-        decide(action: action, trusted: provider.isTrusted(model))
+    static func decide(action: AIAction, provider: AIProvider, model: String, prefs: AIPreferences) -> Decision {
+        decide(action: action, trusted: provider.isTrusted(model), prefs: prefs)
     }
 
     /// 供 UI 展示的一句话说明
-    static func explain(action: AIAction, trusted: Bool) -> String {
-        switch decide(action: action, trusted: trusted) {
+    static func explain(action: AIAction, trusted: Bool, prefs: AIPreferences) -> String {
+        switch decide(action: action, trusted: trusted, prefs: prefs) {
         case .allow:
-            return "可信模型，内容原样发送"
+            return trusted ? "可信模型，内容原样发送" : "已放行，内容原样发送"
         case .redact:
-            return "不可信模型，发送前会自动脱敏（邮箱 / 手机 / 证件号等）"
+            return "不可信模型，发送前会自动脱敏"
         case .confirm:
             return "不可信模型，每次发送前会弹确认"
         case .deny(let reason):
-            return "已拒绝：\(reason)"
+            return reason
         }
     }
 }
