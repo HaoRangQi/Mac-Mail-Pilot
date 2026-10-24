@@ -2,6 +2,14 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.19] - 2026-10-24
+
+### 新增
+
+- **顶栏模型指示器 + 快速切换**：顶栏常驻显示当前在用的模型名（未配置时用金色显示「未配置模型」），点开是弹出面板，不用再进设置
+- **模型切换面板**（`ModelQuickPicker`）：搜索框 + 按服务商分组的模型列表 + 当前项打勾高亮，底部「配置模型服务」直达设置。切换后 toast 确认
+- `AISettingsStore.selectModel(providerID:model:)`：写入选中模型并把该服务商提到数组首位（`activeProvider` 取第一个可用项，顺序即优先级）；`selectableGroups` 提供分组数据，已过滤非对话模型
+
 ## [0.2.18] - 2026-10-24
 
 ### 变更

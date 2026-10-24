@@ -70,9 +70,15 @@ struct RootView: View {
     }
 }
 
+/// CLT 环境缺少 SwiftUIMacros，@State 是宏、编不过，这里沿用 ObservableObject 承载。
+final class TopBarState: ObservableObject {
+    @Published var showModelPicker = false
+}
+
 struct TopBar: View {
     @EnvironmentObject private var model: AppModel
     @FocusState private var searchFocused: Bool
+    @StateObject private var ui = TopBarState()
 
     var body: some View {
         HStack(spacing: 10) {
@@ -110,6 +116,8 @@ struct TopBar: View {
             }
             .buttonStyle(.plain)
             .help("问问 AI（⌘K）")
+
+            modelPicker
 
             Button {
                 model.cycleAppearance()
@@ -171,8 +179,42 @@ struct TopBar: View {
         .frame(height: 36)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 6) {
+    /// 当前模型指示器 + 快速切换。用户要随时知道「现在是谁在干活」
+    private var modelPicker: some View {
+        Button {
+            ui.showModelPicker.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "cpu")
+                    .font(.system(size: 9.5))
+                Text(activeModelLabel)
+                    .font(.system(size: 11.5))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7.5, weight: .semibold))
+            }
+            .foregroundStyle(model.ai.isConfigured ? Color.secondary : Theme.gold)
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .frame(maxWidth: 200)
+            .glassEffect(.regular.interactive(), in: .capsule)
+        }
+        .buttonStyle(.plain)
+        .help("当前模型：\(activeModelLabel)（点击切换）")
+        .popover(isPresented: $ui.showModelPicker, arrowEdge: .bottom) {
+            ModelQuickPicker()
+                .environmentObject(model.ai)
+                .environmentObject(model)
+        }
+    }
+
+    private var activeModelLabel: String {
+        guard let provider = model.ai.activeProvider else { return "未配置模型" }
+        return provider.displayName(for: provider.selectedModel)
+    }
+
+    private var searchField: some View {        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
                 .foregroundStyle(searchFocused ? Theme.moss : Color.secondary)

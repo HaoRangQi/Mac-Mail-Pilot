@@ -178,6 +178,26 @@ final class AISettingsStore: ObservableObject {
         }
     }
 
+    /// 顶栏快速切换模型：写入选中模型，并把它所在服务商提到首位
+    /// （`activeProvider` 取第一个可用项，所以顺序就是优先级）
+    func selectModel(providerID: String, model: String) {
+        guard let index = providers.firstIndex(where: { $0.id == providerID }) else { return }
+        providers[index].selectedModel = model
+        guard index != 0 else { return }
+        let provider = providers.remove(at: index)
+        providers.insert(provider, at: 0)
+    }
+
+    /// 可用于对话的服务商及其模型，供快速切换面板分组展示
+    var selectableGroups: [(provider: AIProvider, models: [String])] {
+        providers
+            .filter { $0.enabled && ($0.kind.isLocal || $0.hasKey) }
+            .map { provider in
+                (provider, provider.models.filter { provider.isChatModel($0) })
+            }
+            .filter { !$0.models.isEmpty }
+    }
+
     var isConfigured: Bool { activeProvider != nil }
 
     func add(_ kind: ProviderKind) {
