@@ -422,6 +422,8 @@ final class AppModel: ObservableObject {    // 数据
         let fallbackText: String
         let mappings: [Redactor.Mapping]
         let charCount: Int
+        /// 脱敏后实际发送的文本，供用户在确认框里逐字检查
+        let outboundPreview: String
     }
 
     /// 所有 AI 调用的唯一入口：查策略 → 脱敏 → 需要确认则挂起 → 发送 → 还原。
@@ -471,7 +473,8 @@ final class AppModel: ObservableObject {    // 数据
             user: user,
             fallbackText: fallbackText,
             mappings: mappings,
-            charCount: user.count
+            charCount: user.count,
+            outboundPreview: user
         )
 
         if decision.needsConfirmation {

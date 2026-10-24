@@ -57,7 +57,24 @@ struct ReaderView: View {
             }
             Button("取消", role: .cancel) { model.pendingAI = nil }
         } message: {
-            Text(pendingAIMessage)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(pendingAIMessage)
+
+                if let request = model.pendingAI {
+                    DisclosureGroup("查看实际发送的内容") {
+                        ScrollView {
+                            Text(request.outboundPreview)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 200)
+                        .padding(8)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                    }
+                    .font(.system(size: 11))
+                }
+            }
         }
     }
 
