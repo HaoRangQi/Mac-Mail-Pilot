@@ -4,6 +4,12 @@ import SwiftUI
 struct MailPilotApp: App {
     @StateObject private var model = AppModel()
 
+    init() {
+        // AppKit 的 tooltip 默认要等 1.5 秒才出来，图标类小按钮等这么久等于没有提示。
+        // NSInitialToolTipDelay 是进程级偏好，这里写进本 App 的域，只影响 MailPilot。
+        UserDefaults.standard.set(220, forKey: "NSInitialToolTipDelay")
+    }
+
     var body: some Scene {
         WindowGroup {
             RootView()

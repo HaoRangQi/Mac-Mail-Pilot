@@ -25,10 +25,12 @@ enum UIScale: String, Codable, CaseIterable, Identifiable {
 
     var factor: CGFloat {
         switch self {
-        case .small: return 0.90
-        case .standard: return 1.00
-        case .large: return 1.12
-        case .xlarge: return 1.24
+        // 基准整体上移：原来的 100% 在实际使用中偏小（正文 12.5pt / 说明 10.5pt，
+        // 比 macOS 系统正文 13pt 还小），现在「小」就是原来的标准，默认「标准」放大 12%
+        case .small: return 1.00
+        case .standard: return 1.12
+        case .large: return 1.26
+        case .xlarge: return 1.40
         }
     }
 
@@ -63,9 +65,9 @@ enum UIFontFamily: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// 强调色。只从既有五个色里挑，保证与液态玻璃底纹、状态色不打架
+/// 强调色。内置四个取自调色板，另可自定义（调色盘）
 enum UIAccent: String, Codable, CaseIterable, Identifiable {
-    case moss, slate, gold, brick
+    case moss, slate, gold, brick, custom
 
     var id: String { rawValue }
 
@@ -75,18 +77,23 @@ enum UIAccent: String, Codable, CaseIterable, Identifiable {
         case .slate: return "蓝灰"
         case .gold: return "金黄"
         case .brick: return "砖红"
+        case .custom: return "自定义"
         }
     }
 
-    /// 注意这里直接取调色板常量，不能走 `Theme.accent`（会绕回自己）
+    /// 内置色块。自定义色不在这里取，走 `UIState.accentColor`
     var color: Color {
         switch self {
         case .moss: return Theme.moss
         case .slate: return Theme.slate
         case .gold: return Theme.gold
         case .brick: return Theme.brick
+        case .custom: return Theme.moss
         }
     }
+
+    /// 设置页里画色块用的列表（自定义单独用一个调色盘控件）
+    static var presets: [UIAccent] { [.moss, .slate, .gold, .brick] }
 }
 
 /// 列表密度：行内边距 + 摘要行数
@@ -221,6 +228,27 @@ enum ReaderLineSpacing: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// 背景图铺法
+enum BackgroundFill: String, Codable, CaseIterable, Identifiable {
+    case fill, fit
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .fill: return "填充"
+        case .fit: return "适应"
+        }
+    }
+
+    var contentMode: ContentMode {
+        switch self {
+        case .fill: return .fill
+        case .fit: return .fit
+        }
+    }
+}
+
 // MARK: - 配置
 
 struct UISettings: Codable, Equatable {
@@ -233,8 +261,50 @@ struct UISettings: Codable, Equatable {
     var readerSize: ReaderFontSize = .standard
     var readerSpacing: ReaderLineSpacing = .standard
 
+    /// 自定义强调色（0xRRGGBB）。只有 `accent == .custom` 时才生效
+    var customAccentHex: UInt32 = 0x46734F
+
+    // MARK: 背景图
+
+    /// 已缓存到本机支持目录的图片路径（空 = 不用背景图）
+    var backgroundPath: String = ""
+    /// 用户看到的来源：本地原文件路径或远程 URL，只用于界面显示
+    var backgroundSource: String = ""
+    var backgroundBlur: Double = 16
+    /// 图片上压一层暗色，保证浅色文字与面板能读
+    var backgroundDim: Double = 0.35
+    var backgroundFill: BackgroundFill = .fill
+
     /// 是否与默认值完全一致（页面用来显示「恢复默认」是否可点）
     var isDefault: Bool { self == UISettings() }
+
+    /// 手写解码：新增字段时旧配置不能整份作废
+    init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case scale, fontFamily, accent, density, panelWidth, backdrop
+        case readerSize, readerSpacing
+        case backgroundPath, backgroundSource, backgroundBlur, backgroundDim, backgroundFill
+        case customAccentHex
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scale = try c.decodeIfPresent(UIScale.self, forKey: .scale) ?? .standard
+        fontFamily = try c.decodeIfPresent(UIFontFamily.self, forKey: .fontFamily) ?? .system
+        accent = try c.decodeIfPresent(UIAccent.self, forKey: .accent) ?? .moss
+        density = try c.decodeIfPresent(UIDensity.self, forKey: .density) ?? .standard
+        panelWidth = try c.decodeIfPresent(UIPanelWidth.self, forKey: .panelWidth) ?? .standard
+        backdrop = try c.decodeIfPresent(UIBackdrop.self, forKey: .backdrop) ?? .standard
+        readerSize = try c.decodeIfPresent(ReaderFontSize.self, forKey: .readerSize) ?? .standard
+        readerSpacing = try c.decodeIfPresent(ReaderLineSpacing.self, forKey: .readerSpacing) ?? .standard
+        backgroundPath = try c.decodeIfPresent(String.self, forKey: .backgroundPath) ?? ""
+        backgroundSource = try c.decodeIfPresent(String.self, forKey: .backgroundSource) ?? ""
+        backgroundBlur = try c.decodeIfPresent(Double.self, forKey: .backgroundBlur) ?? 16
+        backgroundDim = try c.decodeIfPresent(Double.self, forKey: .backgroundDim) ?? 0.35
+        backgroundFill = try c.decodeIfPresent(BackgroundFill.self, forKey: .backgroundFill) ?? .fill
+        customAccentHex = try c.decodeIfPresent(UInt32.self, forKey: .customAccentHex) ?? 0x46734F
+    }
 }
 
 // MARK: - 运行时快照
@@ -251,7 +321,11 @@ enum UIState {
 
     static var scale: CGFloat { current.scale.factor }
     static var fontDesign: Font.Design { current.fontFamily.design }
-    static var accentColor: Color { current.accent.color }
+    static var accentColor: Color {
+        current.accent == .custom
+            ? Color.adaptiveCustom(current.customAccentHex)
+            : current.accent.color
+    }
     static var rowPadding: CGFloat { current.density.rowPadding }
     static var previewLines: Int { current.density.previewLines }
     static var sidebarWidth: CGFloat { current.panelWidth.sidebar }
@@ -259,6 +333,15 @@ enum UIState {
     static var backdropOpacity: Double { current.backdrop.opacity }
     static var readerFontSize: CGFloat { current.readerSize.points }
     static var readerLineSpacing: CGFloat { current.readerSpacing.points }
+
+    // 背景图
+    static var backgroundPath: String { current.backgroundPath }
+    static var backgroundBlur: Double { current.backgroundBlur }
+    static var backgroundDim: Double { current.backgroundDim }
+    static var backgroundFill: BackgroundFill { current.backgroundFill }
+    static var hasBackgroundImage: Bool {
+        !current.backgroundPath.isEmpty && FileManager.default.fileExists(atPath: current.backgroundPath)
+    }
 }
 
 // MARK: - 存储

@@ -50,8 +50,12 @@ final class NativeMailStore: MailStore {
         }
         guard let box = boxes.first(where: { $0.id == mailboxID }) else { return [] }
         let dir = directory(for: box)
-        let files = emlxFiles(in: dir).sorted { $0.1 > $1.1 }.prefix(limit)
-        return files.compactMap { makeMessage(url: $0.0, mailbox: box, includeBody: false) }
+        // 先按文件时间粗取 2 倍候选，再按邮件头 Date 精排：
+        // Mail 迁移/重建索引会把 .emlx 的 mtime 统一刷成迁移时间，
+        // 只看 mtime 会让最新邮件沉到 limit 之外（表现就是「Mail 里有、这里没有」）
+        let candidates = emlxFiles(in: dir).sorted { $0.1 > $1.1 }.prefix(limit * 2)
+        let parsed = candidates.compactMap { makeMessage(url: $0.0, mailbox: box, includeBody: false) }
+        return Array(parsed.sorted { $0.date > $1.date }.prefix(limit))
     }
 
     func message(id: String) async throws -> Message? {
@@ -128,13 +132,15 @@ final class NativeMailStore: MailStore {
             }
             guard include else { continue }
             for file in emlxFiles(in: directory(for: box)) {
-                if smart == .today, file.1 < startOfDay { continue }
                 items.append((file.0, file.1, box))
             }
         }
 
-        return items.sorted { $0.1 > $1.1 }.prefix(limit)
-            .compactMap { makeMessage(url: $0.0, mailbox: $0.2, includeBody: false) }
+        // 同样按 mtime 粗取、按邮件头 Date 精排（见 messages 的说明）
+        let candidates = items.sorted { $0.1 > $1.1 }.prefix(limit * 2)
+        let parsed = candidates.compactMap { makeMessage(url: $0.0, mailbox: $0.2, includeBody: false) }
+        let filtered = smart == .today ? parsed.filter { $0.date >= startOfDay } : parsed
+        return Array(filtered.sorted { $0.date > $1.date }.prefix(limit))
     }
 
     // MARK: - 账户名
@@ -249,6 +255,12 @@ final class NativeMailStore: MailStore {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = dir.appendingPathComponent("diagnose.txt")
 
+        let stamp: (Date) -> String = { date in
+            let f = DateFormatter()
+            f.dateFormat = "MM-dd HH:mm"
+            return f.string(from: date)
+        }
+
         var lines: [String] = []
         lines.append("root: \(root.path)")
         lines.append("accounts: \(Set(boxes.map(\.accountID)).count), mailboxes: \(boxes.count)")
@@ -263,14 +275,20 @@ final class NativeMailStore: MailStore {
 
             let boxesOfAccount = boxes.filter { $0.accountID == id }
             for box in boxesOfAccount {
-                lines.append("  - \(box.name) | raw=\(box.rawName) | role=\(box.role.rawValue) | files=\(fileCount(in: box))")
-            }
+                let files = emlxFiles(in: directory(for: box))
+                let partials = files.filter { $0.0.lastPathComponent.hasSuffix(".partial") }.count
+                lines.append("  - \(box.name) | raw=\(box.rawName) | role=\(box.role.rawValue) | files=\(files.count) | partial=\(partials)")
 
-            let sampleBox = boxesOfAccount.first { $0.role == .inbox } ?? boxesOfAccount.first
-            if let sampleBox {
-                for (url, _) in emlxFiles(in: directory(for: sampleBox)).sorted(by: { $0.1 > $1.1 }).prefix(2) {
-                    guard let parsed = EmlxParser.parse(url: url, includeBody: false) else { continue }
-                    lines.append("  sample from=\(parsed.senderEmail) to=\(parsed.to.joined(separator: ",")) delivered=\(parsed.deliveredTo) msgid=\(parsed.messageID)")
+                // 收件箱额外列出最新 5 封：比较 mtime 与邮件头 Date，
+                // 用来判断「Mail 里有、这里没有」是排序问题还是压根没读到文件
+                guard box.role == .inbox else { continue }
+                for (url, mtime) in files.sorted(by: { $0.1 > $1.1 }).prefix(5) {
+                    guard let parsed = EmlxParser.parse(url: url, includeBody: false) else {
+                        lines.append("    parse-fail \(url.lastPathComponent) mtime=\(stamp(mtime))")
+                        continue
+                    }
+                    let date = parsed.date.map(stamp) ?? "nil"
+                    lines.append("    mtime=\(stamp(mtime)) date=\(date) subj=\(parsed.subject.prefix(26)) file=\(url.lastPathComponent)")
                 }
             }
             lines.append("")
@@ -319,7 +337,10 @@ final class NativeMailStore: MailStore {
             guard accountID != "MailData", accountID != "MailData.plist" else { continue }
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: account.path, isDirectory: &isDir), isDir.boolValue else { continue }
-            for boxURL in findMboxDirectories(in: account, depth: 0) {
+            for (boxURL, isContainer) in findMboxDirectories(in: account, depth: 0) {
+                // 容器邮箱（如 Gmail 的 `[Gmail].mbox`）本身不存邮件，
+                // 列出来会和它下面的子邮箱重复计数
+                guard !isContainer else { continue }
                 let rel = relativePath(boxURL)
                 let name = boxURL.deletingPathExtension().lastPathComponent
                 guard !Self.internalMailboxNames.contains(name.lowercased()) else { continue }
@@ -335,20 +356,22 @@ final class NativeMailStore: MailStore {
         return result.sorted { $0.name < $1.name }
     }
 
-    private func findMboxDirectories(in parent: URL, depth: Int) -> [URL] {
+    /// 返回 (目录, 是否是容器)。容器 = 下面还套着别的 .mbox
+    private func findMboxDirectories(in parent: URL, depth: Int) -> [(URL, Bool)] {
         guard depth < 3 else { return [] }
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(at: parent,
                                                         includingPropertiesForKeys: [.isDirectoryKey],
                                                         options: [.skipsHiddenFiles]) else { return [] }
-        var found: [URL] = []
+        var found: [(URL, Bool)] = []
         for entry in entries {
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: entry.path, isDirectory: &isDir), isDir.boolValue else { continue }
             let name = entry.lastPathComponent
             if name.hasSuffix(".mbox") || name.hasSuffix(".imapmbox") {
-                found.append(entry)
-                found.append(contentsOf: findMboxDirectories(in: entry, depth: depth + 1))
+                let children = findMboxDirectories(in: entry, depth: depth + 1)
+                found.append((entry, !children.isEmpty))
+                found.append(contentsOf: children)
             }
         }
         return found
@@ -416,7 +439,9 @@ final class NativeMailStore: MailStore {
         var files: [(URL, Date)] = []
         for case let url as URL in enumerator {
             let name = url.lastPathComponent
-            guard name.hasSuffix(".emlx") else { continue }
+            // `.emlx.partial` 是 Mail 还没下载完的邮件：Mail 界面上看得到，磁盘上只有半个文件。
+            // 只认 `.emlx` 会把这类最新邮件整封漏掉
+            guard name.hasSuffix(".emlx") || name.hasSuffix(".emlx.partial") else { continue }
             let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
             files.append((url, date))
         }

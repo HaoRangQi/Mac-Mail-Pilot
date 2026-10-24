@@ -28,6 +28,44 @@ extension Color {
             )
         })
     }
+
+    /// 用户自选色的自适应版本。
+    ///
+    /// 只有一个色值时，深色模式下容易糊在暗背景里，所以暗色一侧自动提亮 + 略降饱和。
+    /// 规则跟内置调色板一致：不指望用户自己去挑一个「深色模式也好看」的颜色。
+    static func adaptiveCustom(_ value: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let base = NSColor(
+                srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+                green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255,
+                alpha: 1
+            )
+            guard appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua,
+                  let srgb = base.usingColorSpace(.sRGB) else { return base }
+            var hue: CGFloat = 0
+            var saturation: CGFloat = 0
+            var brightness: CGFloat = 0
+            var alpha: CGFloat = 0
+            srgb.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+            let lifted = NSColor(
+                hue: hue,
+                saturation: min(saturation * 0.82, 1),
+                brightness: min(brightness * 1.42, 1),
+                alpha: 1
+            )
+            return lifted.usingColorSpace(.sRGB) ?? base
+        })
+    }
+
+    /// Color → 0xRRGGBB，给「自定义强调色」落盘用
+    var hexValue: UInt32 {
+        guard let srgb = NSColor(self).usingColorSpace(.sRGB) else { return 0x46734F }
+        let r = UInt32((srgb.redComponent * 255).rounded())
+        let g = UInt32((srgb.greenComponent * 255).rounded())
+        let b = UInt32((srgb.blueComponent * 255).rounded())
+        return (r << 16) | (g << 8) | b
+    }
 }
 
 enum Theme {
@@ -67,6 +105,17 @@ enum Theme {
         startPoint: .topLeading,
         endPoint: .bottomTrailing
     )
+
+    /// AI 按钮的强调渐变。
+    ///
+    /// 和 `aiGradient` 分开：那个是低饱和、给文字着色的；这个要能在玻璃底上认出「这是 AI」。
+    /// 但也别调太艳——实底高饱和会把液态玻璃的透感压死，所以只用在图标和描边上，
+    /// 底色仍然是玻璃。
+    static let aiButtonGradient = LinearGradient(
+        colors: [Color.hex(0x2FA98C), Color.hex(0x4B85CB)],
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
 }
 
 /// 液态玻璃需要背后有内容才能"折射"。玻璃效果要看得见，底色就不能太淡——
@@ -74,34 +123,63 @@ enum Theme {
 ///
 /// 强度可在「外观」里调（无 / 柔和 / 标准）。关掉后玻璃面板仍在，但会显得很平，
 /// 设置页里对此有说明。
+///
+/// **必须把设置当参数传进来**，不能让 body 自己去读 `UIState`：
+/// 这是个无参数视图，SwiftUI 认为它没变化就不会重跑 body，
+/// 结果就是改完背景模糊度要重启 App 才生效。
 struct AppBackground: View {
-    private var strength: Double { UIState.backdropOpacity }
+    let settings: UISettings
+
+    private var strength: Double { settings.backdrop.opacity }
 
     var body: some View {
-        ZStack {
-            Color(nsColor: .windowBackgroundColor)
-            if strength > 0 {
-                Group {
-                    Circle()
-                        .fill(Theme.moss.opacity(0.20))
-                        .frame(width: 620, height: 620)
-                        .blur(radius: 120)
-                        .offset(x: -320, y: -280)
-                    Circle()
-                        .fill(Theme.gold.opacity(0.15))
-                        .frame(width: 520, height: 520)
-                        .blur(radius: 130)
-                        .offset(x: 360, y: 300)
-                    Circle()
-                        .fill(Theme.slate.opacity(0.14))
-                        .frame(width: 460, height: 460)
-                        .blur(radius: 110)
-                        .offset(x: 150, y: -340)
+        GeometryReader { proxy in
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
+
+                if hasImage,
+                   let image = BackgroundImage.rendered(path: settings.backgroundPath,
+                                                        blur: settings.backgroundBlur) {
+                    // 用 GeometryReader 给死宽高：`aspectRatio(.fill)` 会按图片比例
+                    // 反推出一个巨大的理想尺寸，把整个窗口的布局撑大（拉大窗口后排版全乱就是这个）
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: settings.backgroundFill.contentMode)
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+
+                    // 压一层暗色：不然浅色文字和玻璃面板会糊在图上
+                    Color.black.opacity(settings.backgroundDim)
+                } else if strength > 0 {
+                    Group {
+                        Circle()
+                            .fill(Theme.moss.opacity(0.20))
+                            .frame(width: 620, height: 620)
+                            .blur(radius: 120)
+                            .offset(x: -320, y: -280)
+                        Circle()
+                            .fill(Theme.gold.opacity(0.15))
+                            .frame(width: 520, height: 520)
+                            .blur(radius: 130)
+                            .offset(x: 360, y: 300)
+                        Circle()
+                            .fill(Theme.slate.opacity(0.14))
+                            .frame(width: 460, height: 460)
+                            .blur(radius: 110)
+                            .offset(x: 150, y: -340)
+                    }
+                    .opacity(strength)
                 }
-                .opacity(strength)
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .clipped()
         }
         .ignoresSafeArea()
+    }
+
+    private var hasImage: Bool {
+        !settings.backgroundPath.isEmpty
+            && FileManager.default.fileExists(atPath: settings.backgroundPath)
     }
 }
 
@@ -121,12 +199,17 @@ extension Font {
 
 extension View {
     func glassPanel(radius: CGFloat = Theme.panelRadius) -> some View {
-        self.glassEffect(.regular, in: .rect(cornerRadius: radius))
+        self
+            .glassEffect(.regular, in: .rect(cornerRadius: radius))
+            // 玻璃本身不会裁子视图：滚动内容（行背景、分隔线）会从圆角处露出方角，
+            // 看起来就是面板底部多出一个尖角
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
     }
 
-    /// 滚动条默认不显示，鼠标移入才出现。
+    /// 细滚动条：浮层 3pt，默认不显示，鼠标进入或滚动时淡入，**不改变内容宽度**。
+    /// 实现见 `ThinScrollbar.swift`。
     func hoverScrollIndicators() -> some View {
-        modifier(HoverScrollIndicators())
+        modifier(ThinScrollbar())
     }
 
     func faintSeparator() -> some View {
@@ -135,27 +218,6 @@ extension View {
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
         }
-    }
-}
-
-final class ScrollHoverState: ObservableObject {
-    @Published var hovering = false
-}
-
-/// 滚动条默认不显示，鼠标移入才出现。
-///
-/// 两个关键点：
-/// 1. 用 `.never` 而不是 `.hidden` —— macOS 上 `.hidden` 会被系统偏好覆盖，`.never` 才是强制不画
-/// 2. 只能走这个 API：SwiftUI 在 macOS 26 用的是**自绘滚动容器**，视图层级里根本没有
-///    NSScrollView（实测探针的 superview 链只有 `_NSGraphicsView`），拿 AppKit 的
-///    `hasVerticalScroller` 调不到
-struct HoverScrollIndicators: ViewModifier {
-    @StateObject private var state = ScrollHoverState()
-
-    func body(content: Content) -> some View {
-        content
-            .scrollIndicators(state.hovering ? .visible : .never)
-            .onHover { state.hovering = $0 }
     }
 }
 

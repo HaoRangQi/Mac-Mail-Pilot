@@ -5,17 +5,23 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            AppBackground()
+            AppBackground(settings: model.ui.settings)
             VStack(spacing: Theme.gap) {
                 TopBar()
                 HStack(spacing: Theme.gap) {
-                    SidebarView()
-                        .frame(width: Theme.sidebarWidth)
-                    MessageListView()
-                        .frame(width: Theme.listWidth)
+                    if !model.readerExpanded {
+                        SidebarView()
+                            .frame(width: Theme.sidebarWidth)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                        MessageListView()
+                            .frame(width: Theme.listWidth)
+                            .transition(.move(edge: .leading).combined(with: .opacity))
+                    }
                     ReaderView()
                         .frame(maxWidth: .infinity)
+                        .transition(.opacity)
                 }
+                .animation(.spring(response: 0.34, dampingFraction: 0.88), value: model.readerExpanded)
             }
             // 顶部只留 2pt：上面已经是系统给红绿灯预留的 title bar 安全区，
             // 再加 12pt padding 会让顶栏和标题栏之间空出一条明显的白带
@@ -114,11 +120,17 @@ struct TopBar: View {
             Button {
                 model.toggleAsk()
             } label: {
+                // 玻璃底 + 渐变图标 + 渐变细描边：既保住液态玻璃的透感，
+                // 又能在一张浅色背景图上认出这是 AI 入口
                 Image(systemName: "sparkles")
-                    .font(.app(13, weight: .medium))
-                    .foregroundStyle(Theme.aiGradient)
-                    .frame(width: 38, height: 30)
+                    .font(.app(13, weight: .semibold))
+                    .foregroundStyle(Theme.aiButtonGradient)
+                    .frame(width: 40, height: 30)
                     .glassEffect(.regular.interactive(), in: .capsule)
+                    .overlay {
+                        Capsule().stroke(Theme.aiButtonGradient.opacity(0.55), lineWidth: 0.9)
+                    }
+                    .contentShape(Capsule())
             }
             .buttonStyle(.plain)
             .help("问问 AI（⌘K）")

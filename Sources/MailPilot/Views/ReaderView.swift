@@ -1,9 +1,15 @@
 import AppKit
 import SwiftUI
 
+/// 阅读区自己的临时状态（不进 UserDefaults：折叠只是当下想多看几行正文）
+final class ReaderUIState: ObservableObject {
+    @Published var aiCollapsed = false
+}
+
 struct ReaderView: View {
     @EnvironmentObject private var model: AppModel
     @EnvironmentObject private var prefs: AIPreferencesStore
+    @StateObject private var ui = ReaderUIState()
 
     var body: some View {
         ZStack {
@@ -15,6 +21,12 @@ struct ReaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .glassPanel()
+        .overlay(alignment: .topTrailing) {
+            if model.selected != nil {
+                expandButton
+                    .padding(10)
+            }
+        }
         .alert(
             "移入废纸篓？",
             isPresented: $model.showDeleteConfirm,
@@ -68,6 +80,7 @@ struct ReaderView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                         }
+                        .hoverScrollIndicators()
                         .frame(maxHeight: 200)
                         .padding(8)
                         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
@@ -208,6 +221,23 @@ struct ReaderView: View {
         }
     }
 
+    /// 右上角角落里的「正文最大化」按钮。浮在内容上，不参与正文排版
+    private var expandButton: some View {
+        Button {
+            model.readerExpanded.toggle()
+        } label: {
+            Image(systemName: model.readerExpanded
+                  ? "arrow.down.right.and.arrow.up.left"
+                  : "arrow.up.left.and.arrow.down.right")
+                .font(.app(10.5, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 26, height: 26)
+                .glassEffect(.regular.interactive(), in: .circle)
+        }
+        .buttonStyle(.plain)
+        .help(model.readerExpanded ? "还原三栏" : "正文最大化（隐藏侧边栏与列表）")
+    }
+
     private var aiBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             if prefs.prefs.quickRepliesEnabled {
@@ -233,16 +263,7 @@ struct ReaderView: View {
             }
 
             HStack(spacing: 8) {
-                aiButton("AI 摘要", icon: "sparkles") { model.summarize() }
-                aiButton("草拟回复", icon: "arrowshape.turn.up.left") { model.draftReply() }
-                aiButton("分类", icon: "tag") { model.classify() }
-                if prefs.prefs.translateEnabled {
-                    aiButton("翻译", icon: "character.bubble") { model.translate() }
-                }
-                Spacer()
-                if model.aiBusy {
-                    ProgressView().controlSize(.small)
-                }
+                // 删除放在最前：它跟右边一串「生成内容」的动作不是一类，靠右反而容易误点
                 if model.deleting {
                     ProgressView().controlSize(.small)
                 } else if let message = model.selected {
@@ -258,9 +279,45 @@ struct ReaderView: View {
                     .buttonStyle(.plain)
                     .help("移入「邮件」App 的废纸篓")
                 }
+
+                aiButton("AI 摘要", icon: "sparkles") { model.summarize() }
+                aiButton("草拟回复", icon: "arrowshape.turn.up.left") { model.draftReply() }
+                aiButton("分类", icon: "tag") { model.classify() }
+                if prefs.prefs.translateEnabled {
+                    aiButton("翻译", icon: "character.bubble") { model.translate() }
+                }
+                Spacer()
+                if model.aiBusy {
+                    ProgressView().controlSize(.small)
+                }
+                // 折叠按钮只在有结果、且不在编辑态时出现。
+                // 收起 = 整块结果（含脱敏明细、按钮）都不渲染，回到「没点摘要之前」的样子；
+                // 但 model.aiOutput 一个字都不清，展开立刻原样回来，方便和正文比对
+                if model.aiOutput != nil, !model.aiEditing {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            ui.aiCollapsed.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: ui.aiCollapsed ? "chevron.up" : "chevron.down")
+                                .font(.app(9.5, weight: .semibold))
+                            Text(ui.aiCollapsed ? "展开" : "收起")
+                                .font(.app(10.5))
+                        }
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 9)
+                        .frame(height: 26)
+                        .background(Color.primary.opacity(0.05), in: Capsule())
+                        .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(ui.aiCollapsed ? "展开 AI 结果" : "收起 AI 结果，腾出正文空间（内容不丢）")
+                }
             }
 
-            if let output = model.aiOutput {
+            if let output = model.aiOutput, !ui.aiCollapsed {
                 VStack(alignment: .leading, spacing: 9) {
                     if !model.aiOutputTrusted {
                         HStack(spacing: 4) {
@@ -314,6 +371,7 @@ struct ReaderView: View {
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .hoverScrollIndicators()
                         .frame(maxHeight: 150)
                         .padding(11)
                         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
@@ -366,11 +424,17 @@ struct ReaderView: View {
     private func aiButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: icon).font(.app(10.5))
-                Text(title).font(.app(12))
+                // 图标用高饱和渐变，文字保持正文色：背景换成浅色图时按钮不会糊成一片
+                Image(systemName: icon)
+                    .font(.app(10.5, weight: .semibold))
+                    .foregroundStyle(Theme.aiButtonGradient)
+                Text(title)
+                    .font(.app(12, weight: .medium))
+                    .foregroundStyle(.primary)
             }
             .padding(.horizontal, 11)
             .frame(height: 27)
+            .overlay(Capsule().stroke(Theme.aiButtonGradient.opacity(0.35), lineWidth: 0.7))
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)

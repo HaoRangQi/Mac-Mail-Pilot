@@ -38,6 +38,7 @@ struct ModelQuickPicker: View {
                     }
                     .padding(.bottom, 8)
                 }
+                .hoverScrollIndicators()
             }
 
             Divider().opacity(0.5)

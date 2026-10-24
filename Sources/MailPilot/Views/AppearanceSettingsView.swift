@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 「外观」设置页。
 ///
@@ -7,6 +9,7 @@ import SwiftUI
 /// 改完的值经 `UISettingsStore` → `UIState` 快照 → 各视图读取，立刻生效并落盘。
 struct AppearanceSettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @StateObject private var bgForm = BackgroundForm()
 
     private var ui: UISettings { model.ui.settings }
 
@@ -18,6 +21,7 @@ struct AppearanceSettingsView: View {
                 accentSection
                 fontSection
                 layoutSection
+                backgroundSection
                 readerSection
                 footer
             }
@@ -69,24 +73,8 @@ struct AppearanceSettingsView: View {
                 Divider().opacity(0.35).padding(.leading, 24).padding(.vertical, 3)
 
                 HStack(spacing: 8) {
-                    Button {} label: {
-                        Label("写邮件", systemImage: "square.and.pencil")
-                            .font(.app(12, weight: .medium))
-                            .padding(.horizontal, 4)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(Theme.accent)
-                    .controlSize(.small)
-
-                    Button {} label: {
-                        Text("回复")
-                            .font(.app(12))
-                            .padding(.horizontal, 10)
-                            .frame(height: 24)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-
+                    previewPill("写邮件", icon: "square.and.pencil", primary: true)
+                    previewPill("回复", icon: nil, primary: false)
                     UnreadBadge(count: 3)
                     Spacer()
                     Text("正文 \(Int((UIState.readerFontSize * UIState.scale).rounded())) pt")
@@ -101,6 +89,29 @@ struct AppearanceSettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
             // 预览是示意，不是真控件：别让用户点按钮以为能发信
             .allowsHitTesting(false)
+        }
+    }
+
+    /// 预览里的按钮示意。刻意不用 Button + ButtonStyle：
+    /// `.glassProminent` 与 `.bordered` 的内边距不同，并排时高度会差一截，
+    /// 看起来像 bug。这里自己画胶囊，高度统一跟着字号缩放。
+    private func previewPill(_ title: String, icon: String?, primary: Bool) -> some View {
+        HStack(spacing: 4) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.app(10.5, weight: .medium))
+            }
+            Text(title)
+                .font(.app(12, weight: primary ? .medium : .regular))
+        }
+        .foregroundStyle(primary ? Color.white : Color.primary)
+        .padding(.horizontal, 11)
+        .frame(height: 24 * UIState.scale)
+        .background {
+            Capsule().fill(primary ? Theme.accent : Color.primary.opacity(0.07))
+        }
+        .overlay {
+            Capsule().stroke(primary ? Color.white.opacity(0.12) : Color.primary.opacity(0.10), lineWidth: 0.5)
         }
     }
 
@@ -130,11 +141,22 @@ struct AppearanceSettingsView: View {
             header("强调色", "用在按钮、选中行、未读点。砖红同时是删除类操作的警示色")
 
             card {
-                row("当前：\(ui.accent.label)", hint: "取自同一套调色板，换色不会破坏整体配色") {
+                row("当前：\(ui.accent.label)", hint: "前四个取自内置调色板；最后一个用系统调色盘随便挑") {
                     HStack(spacing: 9) {
-                        ForEach(UIAccent.allCases) { option in
+                        ForEach(UIAccent.presets) { option in
                             accentSwatch(option)
                         }
+
+                        // 调色盘：选中即切到「自定义」，深色模式下会自动提亮
+                        ColorPicker("", selection: customAccentBinding, supportsOpacity: false)
+                            .labelsHidden()
+                            .frame(width: 24, height: 24)
+                            .help("自定义强调色")
+                            .padding(4)
+                            .overlay {
+                                Circle().stroke(ui.accent == .custom ? Theme.accent : Color.primary.opacity(0.10),
+                                                lineWidth: ui.accent == .custom ? 1.6 : 1)
+                            }
                     }
                 }
             }
@@ -261,6 +283,182 @@ struct AppearanceSettingsView: View {
         }
     }
 
+    // MARK: - 背景图
+
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header("背景图", "图片会拷一份到本机缓存（Application Support/MailPilot），原文件移动或删除都不影响显示")
+
+            card {
+                row("当前背景", hint: nil) {
+                    HStack(spacing: 8) {
+                        Text(sourceLabel)
+                            .font(.app(11))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 200, alignment: .trailing)
+
+                        Button {
+                            pickLocalImage()
+                        } label: {
+                            Text("选择图片…")
+                                .font(.app(11.5))
+                                .padding(.horizontal, 10)
+                                .frame(height: 26)
+                                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if UIState.hasBackgroundImage {
+                            Button {
+                                removeBackground()
+                            } label: {
+                                Text("移除")
+                                    .font(.app(11.5))
+                                    .foregroundStyle(Theme.brick)
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 26)
+                                    .background(Theme.brick.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
+                divider
+
+                row("图片链接", hint: "直接贴图片地址，支持 http / https") {
+                    HStack(spacing: 8) {
+                        TextField("https://example.com/wallpaper.jpg", text: $bgForm.urlText)
+                            .textFieldStyle(.plain)
+                            .font(.app(11.5, design: .monospaced))
+                            .padding(.horizontal, 9)
+                            .frame(height: 26)
+                            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+
+                        Button {
+                            loadRemoteImage()
+                        } label: {
+                            Text(bgForm.busy ? "载入中…" : "载入")
+                                .font(.app(11.5))
+                                .padding(.horizontal, 12)
+                                .frame(height: 26)
+                                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(bgForm.busy || bgForm.urlText.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                }
+
+                if let status = bgForm.status {
+                    HStack(spacing: 5) {
+                        Image(systemName: bgForm.failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                            .font(.app(10))
+                        Text(status)
+                            .font(.app(10.5))
+                            .lineLimit(2)
+                    }
+                    .foregroundStyle(bgForm.failed ? Theme.brick : Theme.moss)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 8)
+                }
+
+                divider
+
+                row("模糊度", hint: "越模糊越不抢内容") {
+                    HStack(spacing: 8) {
+                        Slider(value: binding(\.backgroundBlur), in: 0...40, step: 2)
+                            .frame(width: 180)
+                        Text("\(Int(ui.backgroundBlur))")
+                            .font(.app(11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, alignment: .trailing)
+                    }
+                }
+
+                divider
+
+                row("压暗", hint: "压一层黑，保证文字和面板看得清") {
+                    HStack(spacing: 8) {
+                        Slider(value: binding(\.backgroundDim), in: 0...0.8, step: 0.05)
+                            .frame(width: 180)
+                        Text("\(Int(ui.backgroundDim * 100))%")
+                            .font(.app(11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 34, alignment: .trailing)
+                    }
+                }
+
+                divider
+
+                row("铺法", hint: "填充会裁掉多余部分，适应会留边") {
+                    SegmentedChoice(
+                        options: BackgroundFill.allCases,
+                        label: { $0.label },
+                        value: binding(\.backgroundFill),
+                        width: 160
+                    )
+                }
+            }
+        }
+    }
+
+    private var sourceLabel: String {
+        guard UIState.hasBackgroundImage else { return "未设置" }
+        let name = ui.backgroundSource
+        if name.isEmpty { return "已设置" }
+        return name.count > 34 ? String(name.suffix(34)) : name
+    }
+
+    private func pickLocalImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "选一张图片作为窗口背景"
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                let path = try BackgroundImage.adopt(local: url)
+                set(\.backgroundPath, path)
+                set(\.backgroundSource, url.lastPathComponent)
+                bgForm.report("已应用：\(url.lastPathComponent)", failed: false)
+            } catch {
+                bgForm.report(error.localizedDescription, failed: true)
+            }
+        }
+    }
+
+    private func loadRemoteImage() {
+        let text = bgForm.urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        bgForm.busy = true
+        bgForm.status = nil
+        Task {
+            do {
+                let path = try await BackgroundImage.adopt(remote: text)
+                set(\.backgroundPath, path)
+                set(\.backgroundSource, text)
+                bgForm.report("已载入", failed: false)
+            } catch {
+                bgForm.report(error.localizedDescription, failed: true)
+            }
+            bgForm.busy = false
+        }
+    }
+
+    private func removeBackground() {
+        BackgroundImage.removeFile()
+        set(\.backgroundPath, "")
+        set(\.backgroundSource, "")
+        bgForm.status = nil
+    }
+
     // MARK: - 阅读
 
     private var readerSection: some View {
@@ -375,6 +573,30 @@ struct AppearanceSettingsView: View {
 
     private func set<T>(_ keyPath: WritableKeyPath<UISettings, T>, _ value: T) {
         model.ui.settings[keyPath: keyPath] = value
+    }
+
+    /// 调色盘绑定：挑任何颜色都切到「自定义」，并把色值记下来
+    private var customAccentBinding: Binding<Color> {
+        Binding(
+            get: { Color.adaptiveCustom(ui.customAccentHex) },
+            set: { color in
+                set(\.customAccentHex, color.hexValue)
+                set(\.accent, .custom)
+            }
+        )
+    }
+}
+
+/// 背景图表单的临时状态：URL 输入、下载进度、错误提示
+final class BackgroundForm: ObservableObject {
+    @Published var urlText = ""
+    @Published var status: String?
+    @Published var failed = false
+    @Published var busy = false
+
+    func report(_ message: String, failed: Bool) {
+        status = message
+        self.failed = failed
     }
 }
 

@@ -61,6 +61,17 @@ enum SettingsTab: String, CaseIterable, Identifiable {
         case .about: return "关于"
         }
     }
+
+    var icon: String {
+        switch self {
+        case .appearance: return "paintbrush"
+        case .permissions: return "lock.shield"
+        case .providers: return "cpu"
+        case .privacy: return "hand.raised"
+        case .features: return "sparkles"
+        case .about: return "info.circle"
+        }
+    }
 }
 
 /// 阅读页 AI 动作类型。决定生成结果下方给哪些操作按钮：
@@ -119,6 +130,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiDraftText = ""
     @Published var composing = false
     @Published var showSettings = false
+    /// 阅读区独占窗口：把侧边栏和列表挤掉，方便看长正文
+    @Published var readerExpanded = false
     @Published var pendingDelete: Message?
     @Published var showDeleteConfirm = false
     /// 删除执行中（全库扫描兜底可能耗时，界面需要给出反馈）

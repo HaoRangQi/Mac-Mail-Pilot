@@ -27,52 +27,37 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Picker("", selection: $model.settingsTab) {
-                    ForEach(SettingsTab.allCases) { tab in
-                        Text(tab.title).tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(width: 470)
-
-                Spacer()
-
-                Button("完成") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                    .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 46)
+        HStack(spacing: 0) {
+            navSidebar
+                .frame(width: 146)
 
             Divider().opacity(0.6)
 
-            switch model.settingsTab {
-            case .appearance:
-                AppearanceSettingsView()
-            case .permissions:
-                PermissionView()
-            case .providers:
-                HStack(spacing: 0) {
-                    providerList
-                        .frame(width: 214)
-                    Divider().opacity(0.6)
-                    detail
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            VStack(spacing: 0) {
+                switch model.settingsTab {
+                case .appearance:
+                    AppearanceSettingsView()
+                case .permissions:
+                    PermissionView()
+                case .providers:
+                    HStack(spacing: 0) {
+                        providerList
+                            .frame(width: 200)
+                        Divider().opacity(0.6)
+                        detail
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
+                case .privacy:
+                    PrivacySettingsView()
+                case .features:
+                    AIFeaturesView()
+                case .about:
+                    AboutView()
                 }
-            case .privacy:
-                PrivacySettingsView()
-            case .features:
-                AIFeaturesView()
-            case .about:
-                AboutView()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 820, height: 660)
+        .frame(width: 940, height: 660)
         .background(.regularMaterial)
         .onAppear {
             if form.selectedID == nil { form.selectedID = ai.providers.first?.id }
@@ -101,6 +86,71 @@ struct SettingsView: View {
                 .environmentObject(ai)
             }
         }
+    }
+
+    // MARK: - 左侧导航
+
+    /// 竖向导航而不是顶部分段：六个中文标题用 segmented 会被系统撑到 900pt 宽，
+    /// 把整个设置面板顶出窗口（预览卡右侧直接看不到）。竖排以后再加 Tab 也不挤。
+    ///
+    /// 宽度按最长标签「隐私与数据」定：图标 14 + 间距 7 + 5 字 ×11.5pt ≈ 58 + 两侧内边距，
+    /// 138pt 刚好，不再留白占地方。
+    private var navSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("设置")
+                .font(.app(11.5, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.top, 16)
+                .padding(.bottom, 9)
+
+            VStack(spacing: 2) {
+                ForEach(SettingsTab.allCases) { tab in
+                    navRow(tab)
+                }
+            }
+            .padding(.horizontal, 7)
+
+            Spacer(minLength: 12)
+
+            Button {
+                dismiss()
+            } label: {
+                Text("完成")
+                    .font(.app(12, weight: .medium))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .keyboardShortcut(.cancelAction)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 11)
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func navRow(_ tab: SettingsTab) -> some View {
+        let selected = model.settingsTab == tab
+        return HStack(spacing: 7) {
+            Image(systemName: tab.icon)
+                .font(.app(12.5))
+                .foregroundStyle(selected ? Theme.accent : Color.secondary)
+                .frame(width: 17)
+            Text(tab.title)
+                .font(.app(12.5, weight: selected ? .medium : .regular))
+                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 9)
+        .frame(height: 32)
+        .background(
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(selected ? Theme.accent.opacity(0.14) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { model.settingsTab = tab }
     }
 
     // MARK: - 左侧服务商列表
@@ -138,9 +188,9 @@ struct SettingsView: View {
                     Image(systemName: "plus")
                     Text("添加服务商")
                 }
-                .font(.app(12))
+                .font(.app(12.5))
                 .frame(maxWidth: .infinity)
-                .frame(height: 30)
+                .frame(height: 32)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -154,20 +204,20 @@ struct SettingsView: View {
         let selected = form.selectedID == provider.id
         let active = ai.activeProvider?.id == provider.id
         return HStack(spacing: 7) {
-            ProviderAvatar(provider: provider, size: 20)
+            ProviderAvatar(provider: provider, size: 22)
             Text(provider.name)
-                .font(.app(12.5))
+                .font(.app(13))
                 .foregroundStyle(provider.enabled ? Color.primary : Color.secondary)
                 .lineLimit(1)
             Spacer(minLength: 2)
             if active {
                 Image(systemName: "checkmark")
-                    .font(.app(9, weight: .semibold))
-                    .foregroundStyle(.tertiary)
+                    .font(.app(10, weight: .semibold))
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 7)
-        .frame(height: 30)
+        .frame(height: 32)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(selected ? Theme.accent.opacity(0.15) : Color.clear)
@@ -236,10 +286,10 @@ struct SettingsView: View {
                 .frame(maxWidth: 260)
 
             Text(provider.kind.label)
-                .font(.app(10.5))
+                .font(.app(11))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7)
-                .frame(height: 19)
+                .frame(height: 21)
                 .background(Color.primary.opacity(0.06), in: Capsule())
 
             Spacer()
@@ -248,9 +298,9 @@ struct SettingsView: View {
                 form.pendingDeleteID = provider.id
             } label: {
                 Image(systemName: "trash")
-                    .font(.app(11.5, weight: .medium))
+                    .font(.app(12.5, weight: .medium))
                     .foregroundStyle(Theme.brick.opacity(0.9))
-                    .frame(width: 28, height: 28)
+                    .frame(width: 30, height: 30)
                     .background(Theme.brick.opacity(0.10), in: Circle())
             }
             .buttonStyle(.plain)
@@ -414,11 +464,17 @@ struct SettingsView: View {
                     form.activeSheet = .test
                 } label: {
                     Text("检测")
-                        .font(.app(12))
+                        .font(.app(12, weight: .medium))
+                        .foregroundStyle(provider.models.isEmpty && provider.selectedModel.isEmpty
+                                         ? Color.secondary : Color.primary)
                         .padding(.horizontal, 14)
                         .frame(height: 30)
+                        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .help("用当前密钥和地址请求一次模型列表")
                 .disabled(provider.models.isEmpty && provider.selectedModel.isEmpty)
             }
         }
@@ -466,18 +522,18 @@ struct SettingsView: View {
             }
 
             Text("实际请求：\(AIService.previewRequestURL(base: provider.baseURL, kind: provider.kind))")
-                .font(.app(10.5, design: .monospaced))
-                .foregroundStyle(.tertiary)
+                .font(.app(11, design: .monospaced))
+                .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
 
             HStack(spacing: 5) {
                 Image(systemName: provider.kind.isLocal ? "lock.shield.fill" : "lock.shield")
-                    .font(.app(10))
+                    .font(.app(11.5))
                 Text(provider.kind.isLocal
                      ? "本地模型，邮件内容不出本机"
                      : "推荐使用本地模型：邮件内容不会离开这台电脑")
-                    .font(.app(10.5))
+                    .font(.app(11.5))
             }
             .foregroundStyle(provider.kind.isLocal ? Theme.moss : Color.secondary)
         }
@@ -555,20 +611,23 @@ struct SettingsView: View {
         let selected = provider.selectedModel == model
         return HStack(spacing: 8) {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                .font(.app(11))
+                .font(.app(12.5))
                 .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.6))
             Text(provider.displayName(for: model))
-                .font(.app(12))
+                .font(.app(12.5))
                 .lineLimit(1)
             Spacer()
 
             if !provider.kind.isLocal {
+                // 图标按钮要留够热区：11pt 的盾牌本身只有 10×10，点起来像在赌博
                 Button {
                     ai.setModelTrust(provider.id, model: model, nextTrustOverride(provider, model))
                 } label: {
                     Image(systemName: trustBadgeIcon(provider, model))
-                        .font(.app(11))
+                        .font(.app(13))
                         .foregroundStyle(trustBadgeColor(provider, model))
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help(trustBadgeHelp(provider, model))
@@ -581,12 +640,15 @@ struct SettingsView: View {
                 }
             } label: {
                 Image(systemName: "minus.circle")
-                    .font(.app(11))
-                    .foregroundStyle(.tertiary)
+                    .font(.app(13))
+                    .foregroundStyle(.secondary.opacity(0.7))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help("从列表移除这个模型")
         }
-        .frame(height: 32)
+        .frame(height: 34)
         .contentShape(Rectangle())
         .onTapGesture {
             ai.update(id: provider.id) { $0.selectedModel = model }
