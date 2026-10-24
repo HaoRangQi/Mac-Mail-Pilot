@@ -1,6 +1,19 @@
 import AppKit
 import SwiftUI
 
+/// 有提示语才挂 `.help()`，没有就不挂——空字符串会弹出一个空白气泡
+private struct OptionalHelp: ViewModifier {
+    let text: String?
+
+    func body(content: Content) -> some View {
+        if let text, !text.isEmpty {
+            content.help(text)
+        } else {
+            content
+        }
+    }
+}
+
 /// 阅读区自己的临时状态（不进 UserDefaults：折叠只是当下想多看几行正文）
 final class ReaderUIState: ObservableObject {
     @Published var aiCollapsed = false
@@ -280,11 +293,19 @@ struct ReaderView: View {
                     .help("移入「邮件」App 的废纸篓")
                 }
 
+                if let message = model.selected {
+                    exemptionToggle(message)
+                }
+
                 aiButton("AI 摘要", icon: "sparkles") { model.summarize() }
                 aiButton("草拟回复", icon: "arrowshape.turn.up.left") { model.draftReply() }
                 aiButton("分类", icon: "tag") { model.classify() }
                 if prefs.prefs.translateEnabled {
-                    aiButton("翻译", icon: "character.bubble") { model.translate() }
+                    aiButton("翻译",
+                             icon: "character.bubble",
+                             help: "翻译模型：\(model.translationModelLabel)") {
+                        model.translate()
+                    }
                 }
                 Spacer()
                 if model.aiBusy {
@@ -319,6 +340,17 @@ struct ReaderView: View {
 
             if let output = model.aiOutput, !ui.aiCollapsed {
                 VStack(alignment: .leading, spacing: 9) {
+                    // 豁免是显式动作，但结果区必须再提醒一次：这次真的没脱敏
+                    if model.aiExempted {
+                        HStack(spacing: 4) {
+                            Image(systemName: "shield.slash.fill")
+                                .font(.app(9))
+                            Text("本次未脱敏：这封邮件已标记为不敏感，内容原样发送")
+                                .font(.app(10.5))
+                        }
+                        .foregroundStyle(Theme.gold)
+                    }
+
                     if !model.aiOutputTrusted {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.shield.fill")
@@ -421,7 +453,62 @@ struct ReaderView: View {
         }
     }
 
-    private func aiButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+    /// 单封邮件的安全开关。
+    ///
+    /// 只有三种状态，**当前生效的是哪一种永远显示在按钮上**——这是防止「绕晕」的关键：
+    /// 模型可信 / 按策略脱敏 / 本封已豁免。切模型时这个按钮的文案会跟着变，
+    /// 用户不用去设置里翻自己上次设了什么。
+    private func exemptionToggle(_ message: Message) -> some View {
+        let exempt = model.isExempt(message)
+        let trusted = model.mainModelTrusted
+
+        let label: String
+        let icon: String
+        let tint: Color
+        if trusted {
+            label = "模型可信"
+            icon = "checkmark.shield.fill"
+            tint = Theme.moss
+        } else if exempt {
+            label = "本封不脱敏"
+            icon = "shield.slash.fill"
+            tint = Theme.gold
+        } else {
+            label = "按策略脱敏"
+            icon = "shield.lefthalf.filled"
+            tint = .secondary
+        }
+
+        return Button {
+            guard !trusted else { return }
+            model.setExempt(!exempt, for: message)
+        } label: {
+            Image(systemName: icon)
+                .font(.app(11, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: 28, height: 28)
+                .background(tint.opacity(exempt ? 0.15 : 0.06), in: Circle())
+                .overlay(Circle().stroke(tint.opacity(exempt ? 0.45 : 0.14), lineWidth: 0.7))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help("\(label)\n\(exemptionHelp(trusted: trusted, exempt: exempt))")
+    }
+
+    private func exemptionHelp(trusted: Bool, exempt: Bool) -> String {
+        if trusted {
+            return "当前模型可信，本来就不脱敏。换成不可信模型时，这里会变成可点的开关。"
+        }
+        if exempt {
+            return "这封邮件已标记为不敏感：在不可信模型上也原样发送，不脱敏、不弹确认。再点一次恢复。"
+        }
+        return "不可信模型下会按策略脱敏 / 弹确认。点一下把这封邮件标记为不敏感，内容原样发送。"
+    }
+
+    private func aiButton(_ title: String,
+                          icon: String,
+                          help: String? = nil,
+                          action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
                 // 图标用高饱和渐变，文字保持正文色：背景换成浅色图时按钮不会糊成一片
@@ -438,6 +525,7 @@ struct ReaderView: View {
         }
         .buttonStyle(.plain)
         .glassEffect(.regular.interactive(), in: .capsule)
+        .modifier(OptionalHelp(text: help))
         .disabled(model.selected == nil)
     }
 

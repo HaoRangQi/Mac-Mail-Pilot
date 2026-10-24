@@ -125,6 +125,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiOutputTrusted = true
     /// 本次输出的脱敏映射，供界面展示「到底把什么替换成了占位符」
     @Published var aiRedactions: [Redactor.Mapping] = []
+    /// 本次是「这封邮件已豁免」才原样发出的（用于结果区提示，别让用户以为脱敏失效了）
+    @Published var aiExempted = false
     /// 回复草稿的编辑态
     @Published var aiEditing = false
     @Published var aiDraftText = ""
@@ -173,7 +175,10 @@ final class AppModel: ObservableObject {    // 数据
     let prefs = AIPreferencesStore()
     /// 界面外观设置。改它 → store 发通知 → 这里转发 → 观察 model 的视图全部重算
     let ui = UISettingsStore()
+    /// 单封邮件的「不敏感」名单（跳过脱敏与确认）
+    let exemption = MailExemptionStore()
     private var uiObserver: AnyCancellable?
+    private var exemptionObserver: AnyCancellable?
     private(set) var store: MailStore = DemoStore()
     private var searchTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -189,6 +194,9 @@ final class AppModel: ObservableObject {    // 数据
         // UIState 是静态快照，视图不会自己发现它变了。
         // 把 store 的变更转发成 AppModel 的变更，主界面才能立刻跟着变。
         uiObserver = ui.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+        exemptionObserver = exemption.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
         }
 
@@ -299,6 +307,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = nil
         aiEditing = false
         aiRedactions = []
+        aiExempted = false
         query = ""
         if showAsk { syncAskScopeToSelection() }
         await loadMessages()
@@ -320,6 +329,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = nil
         aiEditing = false
         aiRedactions = []
+        aiExempted = false
         if message.unread, let idx = messages.firstIndex(where: { $0.id == message.id }) {
             messages[idx].unread = false
         }
@@ -365,6 +375,7 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiOutput = nil
         aiRedactions = []
+        aiExempted = false
         requestAI(action: .summarize,
                   prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
                   message: m,
@@ -379,6 +390,7 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiOutput = nil
         aiRedactions = []
+        aiExempted = false
         requestAI(action: .reply, prompt: prompt, message: m, fallback: { Self.localReply(m) })
     }
 
@@ -388,6 +400,7 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiOutput = nil
         aiRedactions = []
+        aiExempted = false
         requestAI(action: .classify,
                   prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
                   message: m,
@@ -401,10 +414,59 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiOutput = nil
         aiRedactions = []
+        aiExempted = false
         requestAI(action: .translate,
                   prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
                   message: m,
+                  route: translationRoute,
                   fallback: { "（未配置模型，无法翻译）" })
+    }
+
+    /// 翻译专用路由。没配、或配的模型已经不可用（服务商被删/关闭/没密钥）时返回 nil，回落到主模型。
+    ///
+    /// 翻译对语义完整度太敏感：脱敏把「张三」换成占位符，译文就断了。
+    /// 所以允许单独指一个可信/本地模型，宁可换模型也不牺牲译文质量。
+    var translationRoute: (provider: AIProvider, model: String)? {
+        guard let id = prefs.prefs.translationProviderID,
+              let provider = ai.providers.first(where: { $0.id == id }),
+              provider.enabled,
+              provider.kind.isLocal || provider.hasKey else { return nil }
+        let configured = prefs.prefs.translationModel ?? ""
+        let model = configured.isEmpty ? provider.selectedModel : configured
+        guard !model.isEmpty else { return nil }
+        return (provider, model)
+    }
+
+    /// 翻译按钮的浮动提示要显示的模型名
+    var translationModelLabel: String {
+        if let route = translationRoute {
+            return route.provider.displayName(for: route.model)
+        }
+        if let active = ai.activeProvider {
+            return active.displayName(for: active.selectedModel) + "（跟随主模型）"
+        }
+        return "未配置模型"
+    }
+
+    // MARK: - 单封邮件豁免
+
+    /// 豁免名单的键：优先 Message-ID（挪邮箱不变），退回收件路径
+    func exemptionKey(for message: Message) -> String {
+        message.messageID.isEmpty ? message.id : message.messageID
+    }
+
+    func isExempt(_ message: Message) -> Bool {
+        exemption.contains(exemptionKey(for: message))
+    }
+
+    func setExempt(_ exempt: Bool, for message: Message) {
+        exemption.set(exempt, id: exemptionKey(for: message))
+    }
+
+    /// 当前主模型是否可信（用于决定豁免开关显示哪种状态）
+    var mainModelTrusted: Bool {
+        guard let provider = ai.activeProvider else { return true }
+        return provider.isTrusted(provider.selectedModel)
     }
 
     /// 根据最近收件箱生成「我的简介」
@@ -449,6 +511,8 @@ final class AppModel: ObservableObject {    // 数据
     struct PendingAIRequest {
         let action: AIAction
         let provider: AIProvider?
+        /// 这次请求实际用的模型（翻译可以走专用模型，不等于 provider.selectedModel）
+        let model: String
         let system: String
         let user: String
         let fallbackText: String
@@ -465,10 +529,21 @@ final class AppModel: ObservableObject {    // 数据
     private func requestAI(action: AIAction,
                            prompt: String,
                            message: Message,
+                           route: (provider: AIProvider, model: String)? = nil,
                            fallback: () -> String) {
         let fallbackText = fallback()
 
-        guard let provider = ai.activeProvider else {
+        // 翻译可以指定专用模型；其余动作走当前主模型
+        let resolved: (provider: AIProvider, model: String)?
+        if let route {
+            resolved = route
+        } else if let active = ai.activeProvider {
+            resolved = (active, active.selectedModel)
+        } else {
+            resolved = nil
+        }
+
+        guard let resolved else {
             // 演示模式下没有可用模型，也走一遍完整的「脱敏 → 确认 → 预览」链路，
             // 确认后给本地结果。否则用户不配 key 就永远看不到管控长什么样。
             if isDemo {
@@ -483,6 +558,7 @@ final class AppModel: ObservableObject {    // 数据
                 pendingAI = PendingAIRequest(
                     action: action,
                     provider: nil,
+                    model: "",
                     system: "",
                     user: redacted.text,
                     fallbackText: fallbackText,
@@ -500,14 +576,23 @@ final class AppModel: ObservableObject {    // 数据
             return
         }
 
+        let provider = resolved.provider
+        let model = resolved.model
+
+        // 这封邮件是否被用户标记为「不敏感」——标记后跳过脱敏与确认，
+        // 但「禁止该动作」的硬性策略不受影响（见 TrustPolicy）
+        let exempted = exemption.contains(exemptionKey(for: message))
+
         let decision = TrustPolicy.decide(action: action,
                                           provider: provider,
-                                          model: provider.selectedModel,
-                                          prefs: prefs.prefs)
+                                          model: model,
+                                          prefs: prefs.prefs,
+                                          exempted: exempted)
         if case .deny(let reason) = decision {
             aiOutput = "已拒绝：\(reason)"
             return
         }
+        aiExempted = exempted && !provider.isTrusted(model)
 
         let system = prefs.systemPrompt(styleSamples: sentSamples)
         var user = prompt + "\n\n" + context(message)
@@ -525,11 +610,12 @@ final class AppModel: ObservableObject {    // 数据
             aiRedactions = redacted.mappings
         }
 
-        aiOutputTrusted = provider.isTrusted(provider.selectedModel)
+        aiOutputTrusted = provider.isTrusted(model)
 
         let request = PendingAIRequest(
             action: action,
             provider: provider,
+            model: model,
             system: system,
             user: user,
             fallbackText: fallbackText,
@@ -573,6 +659,7 @@ final class AppModel: ObservableObject {    // 数据
             do {
                 let text = try await AIService.chat(
                     provider: provider,
+                    model: request.model.isEmpty ? provider.selectedModel : request.model,
                     system: request.system,
                     user: request.user
                 )

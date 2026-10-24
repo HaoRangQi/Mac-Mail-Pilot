@@ -20,6 +20,7 @@ struct PrivacySettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 overview
                 globalSwitch
+                exemptionSection
                 policySection
                 redactionSection
                 customRulesSection
@@ -86,6 +87,46 @@ struct PrivacySettingsView: View {
             Text("开启后忽略下面每个动作的单独设置，任何内容发往第三方前都会弹确认框。")
                 .font(.app(11))
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - 单封豁免
+
+    /// 阅读页那个「本封不脱敏」开关的总览与清理入口。
+    ///
+    /// 这层豁免是按邮件走的，最容易被忘记——所以必须有一个地方能一眼看到全部，
+    /// 并且能一次清掉。
+    private var exemptionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("单封邮件豁免")
+                .font(.app(12, weight: .medium))
+
+            Text("在阅读页把某封邮件标记为「不敏感」后，它在不可信模型上会原样发送、不脱敏也不确认。这里列出当前所有被标记的邮件。")
+                .font(.app(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Text(model.exemption.ids.isEmpty
+                     ? "还没有标记任何邮件"
+                     : "已标记 \(model.exemption.ids.count) 封")
+                    .font(.app(12))
+                    .foregroundStyle(model.exemption.ids.isEmpty ? .secondary : .primary)
+
+                Spacer()
+
+                Button {
+                    model.exemption.clear()
+                } label: {
+                    Text("全部清除")
+                        .font(.app(11.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(model.exemption.ids.isEmpty)
+            }
+            .padding(11)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
         }
     }
 

@@ -31,7 +31,24 @@ enum TrustPolicy {
     /// 用户可在「设置 → 隐私与数据」里覆盖每个动作在不可信模型上的处置，
     /// 未覆盖时走 `PrivacyDefaults`：只读类（摘要/分类）脱敏，会产生对外
     /// 内容的（草拟回复/翻译）每次确认。
-    static func decide(action: AIAction, trusted: Bool, prefs: AIPreferences) -> Decision {
+    ///
+    /// - Parameter exempted: 这封邮件是否被用户标记为「不敏感」。
+    ///   标记后直接放行，跳过脱敏与确认——但**不推翻 deny**：
+    ///   「禁止该动作用于不可信模型」是用户对动作本身的规定，不该被单封邮件覆盖。
+    static func decide(action: AIAction,
+                       trusted: Bool,
+                       prefs: AIPreferences,
+                       exempted: Bool = false) -> Decision {
+        let base = baseDecision(action: action, trusted: trusted, prefs: prefs)
+        guard exempted else { return base }
+        // 豁免只把 redact / confirm 降级为 allow，deny 保持原样
+        if case .deny = base { return base }
+        return .allow
+    }
+
+    private static func baseDecision(action: AIAction,
+                                     trusted: Bool,
+                                     prefs: AIPreferences) -> Decision {
         guard !trusted else { return .allow }
 
         // 总开关优先：开了就一律先确认
@@ -45,12 +62,22 @@ enum TrustPolicy {
         }
     }
 
-    static func decide(action: AIAction, provider: AIProvider, model: String, prefs: AIPreferences) -> Decision {
-        decide(action: action, trusted: provider.isTrusted(model), prefs: prefs)
+    static func decide(action: AIAction,
+                       provider: AIProvider,
+                       model: String,
+                       prefs: AIPreferences,
+                       exempted: Bool = false) -> Decision {
+        decide(action: action, trusted: provider.isTrusted(model), prefs: prefs, exempted: exempted)
     }
 
     /// 供 UI 展示的一句话说明
-    static func explain(action: AIAction, trusted: Bool, prefs: AIPreferences) -> String {
+    static func explain(action: AIAction,
+                        trusted: Bool,
+                        prefs: AIPreferences,
+                        exempted: Bool = false) -> String {
+        if exempted, !trusted {
+            return "这封邮件已标记为不敏感，内容原样发送，不脱敏也不确认"
+        }
         switch decide(action: action, trusted: trusted, prefs: prefs) {
         case .allow:
             return trusted ? "可信模型，内容原样发送" : "已放行，内容原样发送"

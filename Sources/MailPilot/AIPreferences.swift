@@ -35,6 +35,13 @@ struct AIPreferences: Codable {
     var quickRepliesEnabled = true
     var translateEnabled = true
     var translateTarget = "中文"
+
+    /// 翻译专用模型。为空表示沿用主模型。
+    ///
+    /// 单独配的理由：翻译对**语义完整度**极其敏感，脱敏会把「张三」换成占位符，
+    /// 译文就断了。所以给翻译指一个可信/本地的模型，避免为了脱敏牺牲质量。
+    var translationProviderID: String? = nil
+    var translationModel: String? = nil
     /// 浮动提问框上方的建议，可选（旧配置无此字段）
     var askSuggestions: [String]? = nil
 

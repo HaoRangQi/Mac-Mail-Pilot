@@ -328,7 +328,90 @@ struct AIFeaturesView: View {
                 ))
             }
             .padding(.vertical, 8)
+
+            divider
+            HStack {
+                Label("翻译模型", systemImage: "cpu")
+                    .font(.app(12.5))
+                Spacer()
+                translationModelMenu
+            }
+            .padding(.vertical, 8)
+
+            Text(translationHint)
+                .font(.app(10.5))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 8)
         }
+    }
+
+    /// 翻译可以单独指一个模型。
+    /// 翻译对语义完整度最敏感——脱敏把「张三」换成占位符，整句译文就断了，
+    /// 所以宁可换个模型，也别让译文变成一串占位符。
+    private var translationModelMenu: some View {
+        Menu {
+            Button {
+                prefs.prefs.translationProviderID = nil
+                prefs.prefs.translationModel = nil
+            } label: {
+                if model.translationRoute == nil {
+                    Label("跟随主模型", systemImage: "checkmark")
+                } else {
+                    Text("跟随主模型")
+                }
+            }
+
+            let usable = model.ai.providers.filter { $0.enabled && !$0.models.isEmpty }
+            if !usable.isEmpty {
+                Divider()
+                ForEach(usable) { provider in
+                    Section(provider.name) {
+                        ForEach(provider.models, id: \.self) { m in
+                            let picked = prefs.prefs.translationProviderID == provider.id
+                                && (prefs.prefs.translationModel ?? "") == m
+                            Button {
+                                prefs.prefs.translationProviderID = provider.id
+                                prefs.prefs.translationModel = m
+                            } label: {
+                                if picked {
+                                    Label(provider.displayName(for: m), systemImage: "checkmark")
+                                } else {
+                                    Text(provider.displayName(for: m))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(model.translationRoute == nil ? "跟随主模型" : model.translationModelLabel)
+                    .font(.app(12))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.app(8.5))
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 9)
+            .frame(height: 26)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private var translationHint: String {
+        guard let route = model.translationRoute else {
+            return "未指定时与摘要、草拟回复共用主模型。"
+        }
+        let trusted = route.provider.isTrusted(route.model)
+        if trusted {
+            return "翻译固定使用 \(route.provider.name) · \(route.provider.displayName(for: route.model))，内容原样发送，不脱敏。"
+        }
+        return "翻译固定使用 \(route.provider.name) · \(route.provider.displayName(for: route.model))。该模型不可信，发送前仍会脱敏——译文可能被占位符打断，建议换成可信或本地模型。"
     }
 
     private var footnote: some View {
