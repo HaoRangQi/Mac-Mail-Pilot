@@ -45,6 +45,27 @@ struct RootView: View {
                 .environmentObject(model.prefs)
                 .environmentObject(model)
         }
+        .alert("操作失败", isPresented: Binding(
+            get: { model.errorMessage != nil },
+            set: { presented in if !presented { model.errorMessage = nil } }
+        )) {
+            Button("知道了") { model.errorMessage = nil }
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = model.toast {
+                Text(toast)
+                    .font(.system(size: 12))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                    .padding(.bottom, 26)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: model.toast)
     }
 }
 

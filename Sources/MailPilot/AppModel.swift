@@ -81,6 +81,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var loading = false
     @Published var syncing = false
     @Published var errorMessage: String?
+    /// 轻量操作反馈，2.5 秒后自动消失
+    @Published var toast: String?
     @Published var isDemo = true
     @Published var aiOutput: String?
     @Published var aiBusy = false
@@ -121,6 +123,7 @@ final class AppModel: ObservableObject {    // 数据
     let prefs = AIPreferencesStore()
     private(set) var store: MailStore = DemoStore()
     private var searchTask: Task<Void, Never>?
+    private var toastTask: Task<Void, Never>?
     private var sentSamples: [String] = []
     private let askStorageKey = "mailpilot.ai.askHistory"
 
@@ -444,16 +447,31 @@ final class AppModel: ObservableObject {    // 数据
 
     func confirmDelete() async {
         guard let target = pendingDelete else { return }
+        pendingDelete = nil
+        showDeleteConfirm = false
         do {
             try await store.moveToTrash(target)
             if selected?.id == target.id { selected = nil }
             messages.removeAll { $0.id == target.id }
+            // 以数据源为准重新拉一次：真实模式下 .emlx 已移走，演示模式下内存已移除
+            await loadMessages()
             badges = (try? await store.badgeCounts()) ?? badges
             mailboxes = (try? await store.mailboxes()) ?? mailboxes
+            showToast(isDemo ? "已从演示数据中移除" : "已移入「邮件」App 的废纸篓")
         } catch {
             errorMessage = error.localizedDescription
         }
-        pendingDelete = nil
+    }
+
+    /// 底部轻提示，自动消失
+    func showToast(_ text: String) {
+        toast = text
+        toastTask?.cancel()
+        toastTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            toast = nil
+        }
     }
 
     // MARK: - 外观

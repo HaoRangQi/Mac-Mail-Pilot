@@ -14,17 +14,19 @@ struct ReaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .glassPanel()
-        .confirmationDialog(
+        .alert(
             "移入废纸篓？",
             isPresented: $model.showDeleteConfirm,
             presenting: model.pendingDelete
-        ) { message in
+        ) { _ in
             Button("移入废纸篓", role: .destructive) {
                 Task { await model.confirmDelete() }
             }
-            Button("取消", role: .cancel) {}
+            Button("取消", role: .cancel) { model.pendingDelete = nil }
         } message: { message in
-            Text("「\(message.subject)」\n将在「邮件」App 中移入该账户的废纸篓，可在邮件 App 里恢复。")
+            Text(model.isDemo
+                 ? "「\(message.subject)」\n\n当前是演示数据，只会从列表移除，不会动真实邮件。"
+                 : "「\(message.subject)」\n\n将在「邮件」App 中移入该账户的废纸篓，可在邮件 App 里恢复。")
         }
     }
 
