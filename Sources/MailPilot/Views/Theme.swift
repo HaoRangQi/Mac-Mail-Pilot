@@ -67,26 +67,27 @@ enum Theme {
     )
 }
 
-/// 液态玻璃需要背后有内容才能"折射"，这里用极淡的色块做底。
+/// 液态玻璃需要背后有内容才能"折射"。玻璃效果要看得见，底色就不能太淡——
+/// 这里用三个大色斑做底，左上那个正好落在顶栏按钮后面。
 struct AppBackground: View {
     var body: some View {
         ZStack {
             Color(nsColor: .windowBackgroundColor)
             Circle()
-                .fill(Theme.moss.opacity(0.16))
-                .frame(width: 560, height: 560)
-                .blur(radius: 130)
-                .offset(x: -340, y: -300)
-            Circle()
-                .fill(Theme.gold.opacity(0.13))
-                .frame(width: 520, height: 520)
-                .blur(radius: 140)
-                .offset(x: 380, y: 320)
-            Circle()
-                .fill(Theme.slate.opacity(0.11))
-                .frame(width: 420, height: 420)
+                .fill(Theme.moss.opacity(0.32))
+                .frame(width: 620, height: 620)
                 .blur(radius: 120)
-                .offset(x: 120, y: -360)
+                .offset(x: -320, y: -280)
+            Circle()
+                .fill(Theme.gold.opacity(0.24))
+                .frame(width: 520, height: 520)
+                .blur(radius: 130)
+                .offset(x: 360, y: 300)
+            Circle()
+                .fill(Theme.slate.opacity(0.22))
+                .frame(width: 460, height: 460)
+                .blur(radius: 110)
+                .offset(x: 150, y: -340)
         }
         .ignoresSafeArea()
     }

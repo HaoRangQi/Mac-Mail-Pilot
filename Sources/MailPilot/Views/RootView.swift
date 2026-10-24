@@ -103,16 +103,10 @@ struct TopBar: View {
                 model.toggleAsk()
             } label: {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(Theme.aiGradient)
-                    .frame(width: 44, height: 30)
-                    .background(
-                        Theme.aiGradient.opacity(0.14),
-                        in: Capsule()
-                    )
-                    .overlay(
-                        Capsule().stroke(Theme.aiGradient.opacity(0.35), lineWidth: 0.5)
-                    )
+                    .frame(width: 38, height: 30)
+                    .glassEffect(.regular.interactive(), in: .capsule)
             }
             .buttonStyle(.plain)
             .help("问问 AI（⌘K）")
@@ -124,7 +118,7 @@ struct TopBar: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
-                    .background(Color.primary.opacity(0.05), in: Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
             .help("外观：\(model.appearance.label)（点击切换）")
@@ -136,7 +130,7 @@ struct TopBar: View {
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
-                    .background(Color.primary.opacity(0.05), in: Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
             .help("模型服务设置")
@@ -153,7 +147,7 @@ struct TopBar: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
-                        .background(Color.primary.opacity(0.05), in: Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
                 }
             }
             .buttonStyle(.plain)

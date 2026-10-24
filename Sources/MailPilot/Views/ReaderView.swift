@@ -205,9 +205,8 @@ struct ReaderView: View {
                         Image(systemName: "trash")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.brick)
-                            .frame(width: 27, height: 27)
-                            .background(Theme.brick.opacity(0.10), in: Circle())
-                            .overlay(Circle().stroke(Theme.brick.opacity(0.20), lineWidth: 0.5))
+                            .frame(width: 28, height: 28)
+                            .glassEffect(.regular.interactive(), in: .circle)
                     }
                     .buttonStyle(.plain)
                     .help("移入「邮件」App 的废纸篓")
@@ -246,8 +245,7 @@ struct ReaderView: View {
             .frame(height: 27)
         }
         .buttonStyle(.plain)
-        .background(Color.primary.opacity(0.05), in: Capsule())
-        .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
+        .glassEffect(.regular.interactive(), in: .capsule)
         .disabled(model.selected == nil)
     }
 
