@@ -8,6 +8,7 @@ final class NativeMailStore: MailStore {
     private var boxes: [Mailbox] = []
     private var accountNames: [String: String] = [:]
     private var accountNameCache: [String: String] = [:]
+    private var accountEmailCache: [String: String] = [:]
 
     init?() {
         guard case .authorized = MailAccess.status(),
@@ -90,6 +91,23 @@ final class NativeMailStore: MailStore {
         return counts
     }
 
+    // MARK: - 删除（移入「邮件」App 废纸篓）
+
+    func moveToTrash(_ message: Message) async throws {
+        guard !message.messageID.isEmpty else {
+            throw MailMutatorError.missingMessageID
+        }
+        guard let box = boxes.first(where: { $0.id == message.mailboxID }) else {
+            throw MailMutatorError.notFound("找不到这封邮件所在的邮箱")
+        }
+        try await MailMutator.moveToTrash(
+            accountName: accountDisplayName(message.accountID),
+            accountEmail: accountEmail(message.accountID),
+            mailboxName: box.rawName,
+            messageID: message.messageID
+        )
+    }
+
     // MARK: - 聚合邮箱
 
     private func smartMessages(_ smart: SmartBox, limit: Int) -> [Message] {
@@ -120,6 +138,14 @@ final class NativeMailStore: MailStore {
 
     // MARK: - 账户名
 
+    /// 账户的邮箱地址（AppleScript 按地址回退定位账户用）
+    private func accountEmail(_ accountID: String) -> String {
+        if let cached = accountEmailCache[accountID] { return cached }
+        var resolved = plistAccountEmail(accountID) ?? inferAccountAddress(accountID) ?? ""
+        accountEmailCache[accountID] = resolved
+        return resolved
+    }
+
     private func accountDisplayName(_ accountID: String) -> String {
         if let cached = accountNameCache[accountID] { return cached }
         if let known = accountNames[accountID], !known.isEmpty {
@@ -137,6 +163,26 @@ final class NativeMailStore: MailStore {
         let fallback = "账户 " + String(accountID.prefix(6)).lowercased()
         accountNameCache[accountID] = fallback
         return fallback
+    }
+
+    /// 只取邮箱地址，不给显示名兜底
+    private func plistAccountEmail(_ accountID: String) -> String? {
+        let dir = root.appendingPathComponent(accountID)
+        for name in ["Info.plist", "Account.plist", "AccountInfo.plist", "Mailbox.plist"] {
+            let url = dir.appendingPathComponent(name)
+            guard let data = try? Data(contentsOf: url),
+                  let object = try? PropertyListSerialization.propertyList(from: data, format: nil),
+                  let dict = object as? [String: Any] else { continue }
+            for key in ["EmailAddresses", "Email", "Address", "Username", "AccountAddress"] {
+                if let value = dict[key] as? String, value.contains("@") {
+                    return value.lowercased()
+                }
+                if let list = dict[key] as? [String], let first = list.first, first.contains("@") {
+                    return first.lowercased()
+                }
+            }
+        }
+        return nil
     }
 
     /// 尝试从账户目录里的 plist 读邮箱地址
@@ -210,20 +256,20 @@ final class NativeMailStore: MailStore {
         let accountDirs = (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
         for accountDir in accountDirs where accountDir.lastPathComponent != "MailData" {
             let id = accountDir.lastPathComponent
-            lines.append("[account] \(id)")
+            lines.append("[account] \(id) | display=\(accountDisplayName(id)) | email=\(accountEmail(id))")
             let entries = (try? fm.contentsOfDirectory(atPath: accountDir.path)) ?? []
             lines.append("  entries: \(entries.prefix(12).joined(separator: ", "))")
 
             let boxesOfAccount = boxes.filter { $0.accountID == id }
             for box in boxesOfAccount {
-                lines.append("  - \(box.name) | role=\(box.role.rawValue) | files=\(fileCount(in: box))")
+                lines.append("  - \(box.name) | raw=\(box.rawName) | role=\(box.role.rawValue) | files=\(fileCount(in: box))")
             }
 
             let sampleBox = boxesOfAccount.first { $0.role == .inbox } ?? boxesOfAccount.first
             if let sampleBox {
                 for (url, _) in emlxFiles(in: directory(for: sampleBox)).sorted(by: { $0.1 > $1.1 }).prefix(2) {
                     guard let parsed = EmlxParser.parse(url: url, includeBody: false) else { continue }
-                    lines.append("  sample from=\(parsed.senderEmail) to=\(parsed.to.joined(separator: ",")) delivered=\(parsed.deliveredTo)")
+                    lines.append("  sample from=\(parsed.senderEmail) to=\(parsed.to.joined(separator: ",")) delivered=\(parsed.deliveredTo) msgid=\(parsed.messageID)")
                 }
             }
             lines.append("")
@@ -271,6 +317,7 @@ final class NativeMailStore: MailStore {
                     id: "native:" + rel,
                     accountID: accountID,
                     name: displayName(for: name),
+                    rawName: name,
                     role: role(for: name)
                 ))
             }
@@ -384,6 +431,7 @@ final class NativeMailStore: MailStore {
             flagged: false,
             needsReply: false,
             threadID: parsed.messageID,
+            messageID: parsed.messageID,
             attachments: []
         )
     }

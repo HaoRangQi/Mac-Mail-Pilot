@@ -335,6 +335,12 @@ final class DemoStore: MailStore {
         }.sorted { $0.date > $1.date }.prefix(limit).map { $0 }
     }
 
+    /// 演示模式：直接从内存移除（演示数据本就不落盘）
+    func moveToTrash(_ message: Message) async throws {
+        all.removeAll { $0.id == message.id }
+        refreshCounts()
+    }
+
     func badgeCounts() async throws -> [String: Int] {
         var out: [String: Int] = [:]
         for box in SmartBox.allCases {

@@ -15,7 +15,7 @@
 | 技术栈 | **全 Swift，不要 Python** | Python 版降级为"实现原理参考"，不再是运行时依赖 |
 | MCP | 不保留 MCP 访问层 | 只借鉴其实现思路（AppleScript 发送、emlx 解析） |
 | 未读状态 | **本期不做** | 列表不显示未读小红点，也不读私有 Envelope Index |
-| 删除 | **永不自动**，AI 只负责找，人确认后才删 | 所有破坏性操作必须二次确认 |
+| 删除 | **永不自动**，必须人点二次确认；已实现：借道「邮件」App 移入账户废纸篓 | 实现方式与 Apple Mail MCP 一致（AppleScript），Mail 的索引与服务器同步更新，刷新不会复活 |
 | 发送 | 两条路径都实现，实测后取舍 | mailto + AppleScript，后者可切"直接发送" |
 
 ## 3. 架构
@@ -35,10 +35,13 @@
 │   └─ NativeStore    读 ~/Library/Mail   │
 │       │                                 │
 │  MailSender ── mailto / AppleScript     │
+│  MailMutator ── AppleScript 删除        │
 └─────────────────────────────────────────┘
 ```
 
 关键点：`MailStore` 是协议，视图层不关心数据来自演示还是真实文件。接真实邮件时只换实现，界面零改动。
+
+`MailMutator` 与 `MailSender` 同构：都不碰邮件存储，只通过 AppleScript 让「邮件」App 自己动手。删除的定位链是 账户名 → 邮箱名 → RFC 2822 Message-ID（与 Apple Mail MCP 服务器同一方案），Message-ID 由 `EmlxParser` 从头解析获得；账户名 / 邮箱名定位均有回退（地址匹配、全邮箱扫描、`delete` 失败改显式 `move` 到废纸篓）。
 
 ## 4. 当前实现状态
 
@@ -60,7 +63,8 @@
 - **关于页**：设置的第四个 Tab（权限管理 / 模型服务 / AI 功能 / 关于），含数据来源、数据位置、隐私说明、打开数据目录；菜单「关于 MailPilot」会打开设置并跳到该 Tab
 - AI 栏三个动作已接真实模型；未配置时回退到本地规则生成，并明确提示
 - **发送双路**：`mailto` 打开撰写窗口；AppleScript 创建撰写窗口，可选"直接发送"
-- **删除确认**：`confirmationDialog` 二次确认，确认后才真正移除
+- **真实删除**：阅读页垃圾桶按钮 → 二次确认 → `MailMutator` 用 AppleScript 让「邮件」App 把邮件移入该账户的废纸篓。`.emlx` 随之移出原邮箱目录、Envelope Index 与 IMAP 服务器同步更新，刷新不会复活；弹框文案如实说明去向。首次执行需在系统弹窗中允许 MailPilot 控制「邮件」（隐私与安全性 → 自动化）
+- 启动状态落盘 `~/Library/Application Support/MailPilot/status.txt`（store 模式 + FDA 状态），诊断文件 `diagnose.txt` 补充 rawName / 账户名 / 邮箱地址 / Message-ID，用于排查权限与定位问题
 - 打包脚本 `scripts/build.sh`，输出 `build/MailPilot.app`（ad-hoc 签名）
 
 部分完成 / 有已知缺陷：

@@ -86,6 +86,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiBusy = false
     @Published var composing = false
     @Published var showSettings = false
+    @Published var pendingDelete: Message?
+    @Published var showDeleteConfirm = false
     @Published var showOnboarding = false
 
     // 设置
@@ -137,6 +139,29 @@ final class AppModel: ObservableObject {    // 数据
             if !UserDefaults.standard.bool(forKey: "mailpilot.onboarding.dismissed") {
                 showOnboarding = true
             }
+        }
+        writeLaunchStatus()
+    }
+
+    /// 每次启动把权限状态与所用数据源追加到 status.txt，方便排查「为什么停在演示模式」
+    private func writeLaunchStatus() {
+        let status: String
+        switch MailAccess.status() {
+        case .authorized(let version): status = "authorized(\(version))"
+        case .denied: status = "denied"
+        case .noMailData: status = "noMailData"
+        }
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return }
+        let file = base.appendingPathComponent("MailPilot/status.txt")
+        let line = "\(stamp) store=\(isDemo ? "demo" : "native") fda=\(status)\n"
+        if let handle = try? FileHandle(forWritingTo: file) {
+            handle.seekToEndOfFile()
+            handle.write(line.data(using: .utf8) ?? Data())
+            try? handle.close()
+        } else {
+            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? line.write(to: file, atomically: true, encoding: .utf8)
         }
     }
 
@@ -408,6 +433,27 @@ final class AppModel: ObservableObject {    // 数据
         for (k, v) in table where s.contains(k) { category = v; break }
         let priority = m.needsReply ? "高" : "低"
         return "分类：\(category)\n优先级：\(priority)\n需回复：\(m.needsReply ? "是" : "否")"
+    }
+
+    // MARK: - 删除（永不自动执行，必须二次确认；真实移入「邮件」App 废纸篓）
+
+    func requestDelete(_ message: Message) {
+        pendingDelete = message
+        showDeleteConfirm = true
+    }
+
+    func confirmDelete() async {
+        guard let target = pendingDelete else { return }
+        do {
+            try await store.moveToTrash(target)
+            if selected?.id == target.id { selected = nil }
+            messages.removeAll { $0.id == target.id }
+            badges = (try? await store.badgeCounts()) ?? badges
+            mailboxes = (try? await store.mailboxes()) ?? mailboxes
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        pendingDelete = nil
     }
 
     // MARK: - 外观

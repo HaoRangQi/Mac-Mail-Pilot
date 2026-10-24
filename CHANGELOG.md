@@ -2,6 +2,20 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.3] - 2026-10-24
+
+### 新增
+
+- **真实删除（移入「邮件」App 废纸篓）**：新增 `MailMutator`，用 AppleScript 让「邮件」App 自己执行删除（与 Apple Mail MCP 服务器同一方案）。定位链 账户名 → 邮箱名 → RFC 2822 Message-ID，各级均有回退：账户按 Accounts.plist 名字 → 邮箱地址 → 唯一账户；邮箱按原始目录名 → 扫描账户下所有邮箱；删除动作 `delete` → 显式 `move` 到废纸篓邮箱（中英文废纸篓名都匹配）
+- 阅读页恢复垃圾桶按钮与二次确认弹框，文案如实说明「移入该账户的废纸篓，可在邮件 App 里恢复」
+- `Message` 新增 `messageID` 字段、`Mailbox` 新增 `rawName` 字段（「邮件」App 原始邮箱名，AppleScript 定位用）；`MailStore` 协议新增 `moveToTrash(_:)`
+- 启动状态落盘 `status.txt`（store 模式 + FDA 状态），诊断文件补充 rawName / 账户名 / 邮箱地址 / Message-ID
+
+### 变更
+
+- 删除不再只从内存列表移除：确认后 `.emlx` 被「邮件」App 移出原邮箱目录，Envelope Index 与 IMAP 服务器同步更新，刷新不会复活
+- 首次删除需在系统弹窗中允许 MailPilot 控制「邮件」（系统设置 → 隐私与安全性 → 自动化）
+
 ## [0.2.2] - 2026-10-24
 
 ### 移除

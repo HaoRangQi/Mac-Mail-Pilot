@@ -14,6 +14,18 @@ struct ReaderView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .glassPanel()
+        .confirmationDialog(
+            "移入废纸篓？",
+            isPresented: $model.showDeleteConfirm,
+            presenting: model.pendingDelete
+        ) { message in
+            Button("移入废纸篓", role: .destructive) {
+                Task { await model.confirmDelete() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { message in
+            Text("「\(message.subject)」\n将在「邮件」App 中移入该账户的废纸篓，可在邮件 App 里恢复。")
+        }
     }
 
     private var emptyState: some View {
@@ -131,6 +143,20 @@ struct ReaderView: View {
                 Spacer()
                 if model.aiBusy {
                     ProgressView().controlSize(.small)
+                }
+                if let message = model.selected {
+                    Button {
+                        model.requestDelete(message)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Color.red)
+                            .frame(width: 27, height: 27)
+                            .background(Color.red.opacity(0.10), in: Circle())
+                            .overlay(Circle().stroke(Color.red.opacity(0.20), lineWidth: 0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .help("移入「邮件」App 的废纸篓")
                 }
             }
 

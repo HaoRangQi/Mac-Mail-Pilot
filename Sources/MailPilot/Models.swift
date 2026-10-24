@@ -11,6 +11,8 @@ struct Mailbox: Identifiable, Hashable {
     let id: String
     var accountID: String
     var name: String
+    /// 「邮件」App 里的原始邮箱名（AppleScript 定位用，如 INBOX / 已删除邮件 / All Mail）
+    var rawName: String = ""
     var role: Role = .custom
     var unread: Int = 0
     var total: Int = 0
@@ -47,6 +49,8 @@ struct Message: Identifiable, Hashable {
     var flagged: Bool = false
     var needsReply: Bool = false
     var threadID: String = ""
+    /// RFC 2822 Message-ID（含尖括号），AppleScript 在「邮件」App 中定位消息用
+    var messageID: String = ""
     var attachments: [Attachment] = []
 
     var displaySender: String {
@@ -62,6 +66,8 @@ protocol MailStore: AnyObject {
     func messages(mailboxID: String, limit: Int) async throws -> [Message]
     func message(id: String) async throws -> Message?
     func search(_ query: String, limit: Int) async throws -> [Message]
+    /// 把邮件移入「邮件」App 的废纸篓（真实删除，走 AppleScript）
+    func moveToTrash(_ message: Message) async throws
     /// 侧边栏「个人收藏」与「智能邮箱」的角标
     func badgeCounts() async throws -> [String: Int]
 }
