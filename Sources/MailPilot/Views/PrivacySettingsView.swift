@@ -11,6 +11,7 @@ import SwiftUI
 struct PrivacySettingsView: View {
     @EnvironmentObject private var ai: AISettingsStore
     @EnvironmentObject private var model: AppModel
+    @StateObject private var form = PrivacyForm()
 
     private var prefs: AIPreferences { model.prefs.prefs }
 
@@ -21,10 +22,20 @@ struct PrivacySettingsView: View {
                 globalSwitch
                 policySection
                 redactionSection
+                customRulesSection
+                keywordsSection
             }
             .padding(22)
         }
         .hoverScrollIndicators()
+        .sheet(item: $form.editingRule) { rule in
+            AddRedactionRuleView(existing: rule)
+                .environmentObject(model)
+        }
+        .sheet(isPresented: $form.addingRule) {
+            AddRedactionRuleView()
+                .environmentObject(model)
+        }
     }
 
     // MARK: - 概览
@@ -180,10 +191,136 @@ struct PrivacySettingsView: View {
         }
     }
 
+    // MARK: - 自定义正则规则
+
+    private var customRulesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("自定义正则规则")
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Button {
+                    form.addingRule = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus").font(.system(size: 10))
+                        Text("添加").font(.system(size: 11.5))
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            Text("用于内置规则覆盖不到的模式，如公司内部的项目代号、工单号。正则写错不会报错、只是不生效，所以添加时可以先用测试文本验证。")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if prefs.customRedactionRules.isEmpty {
+                Text("还没有自定义规则")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(prefs.customRedactionRules.enumerated()), id: \.element.id) { index, rule in
+                        HStack(spacing: 9) {
+                            Toggle("", isOn: Binding(
+                                get: { rule.enabled },
+                                set: { model.prefs.prefs.customRedactionRules[index].enabled = $0 }
+                            ))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .controlSize(.mini)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(rule.name)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(rule.enabled ? Color.primary : Color.secondary)
+                                Text(rule.pattern)
+                                    .font(.system(size: 9.5, design: .monospaced))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            Button {
+                                form.editingRule = rule
+                            } label: {
+                                Image(systemName: "pencil")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("编辑")
+
+                            Button {
+                                model.prefs.prefs.customRedactionRules.removeAll { $0.id == rule.id }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(Theme.brick.opacity(0.85))
+                            }
+                            .buttonStyle(.plain)
+                            .help("删除")
+                        }
+                        .frame(height: 36)
+
+                        if index != prefs.customRedactionRules.count - 1 {
+                            Divider().opacity(0.35)
+                        }
+                    }
+                }
+                .padding(.horizontal, 11)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+        }
+    }
+
+    // MARK: - 关键字脱敏
+
+    private var keywordsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("关键字脱敏")
+                .font(.system(size: 12, weight: .medium))
+
+            Text("一行一个。命中的词整体替换成 ⟨关键字N⟩，不走正则，最可靠。适合公司名、项目代号、客户名这类固定说法。")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextEditor(text: keywordsBinding)
+                .font(.system(size: 12, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .frame(height: 108)
+                .padding(8)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+
+            Text("当前 \(prefs.redactionKeywords.count) 个关键字")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    /// 一行一个关键字的编辑绑定
+    private var keywordsBinding: Binding<String> {
+        Binding(
+            get: { prefs.redactionKeywords.joined(separator: "\n") },
+            set: { newValue in
+                model.prefs.prefs.redactionKeywords = newValue
+                    .split(separator: "\n", omittingEmptySubsequences: false)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }
+        )
+    }
+
     // MARK: - 绑定
 
-    private func binding(_ keyPath: WritableKeyPath<AIPreferences, Bool>) -> Binding<Bool> {
-        Binding(
+    private func binding(_ keyPath: WritableKeyPath<AIPreferences, Bool>) -> Binding<Bool> {        Binding(
             get: { model.prefs.prefs[keyPath: keyPath] },
             set: { model.prefs.prefs[keyPath: keyPath] = $0 }
         )
@@ -207,4 +344,10 @@ struct PrivacySettingsView: View {
 private extension AIAction {
     /// 设置页里要展示的动作
     static let allCasesForSettings: [AIAction] = [.summarize, .reply, .classify, .translate]
+}
+
+/// 隐私设置页的表单状态（@State 在 CLT 下编不过，沿用 ObservableObject）
+final class PrivacyForm: ObservableObject {
+    @Published var addingRule = false
+    @Published var editingRule: CustomRedactionRule?
 }

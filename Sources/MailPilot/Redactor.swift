@@ -52,40 +52,88 @@ struct Redactor {
 
     // MARK: - 脱敏
 
-    static func redact(_ text: String, disabledRules: Set<String> = []) -> (text: String, mappings: [Mapping]) {
+    /// 脱敏入口。
+    ///
+    /// 顺序：先关键字（纯文本，最可靠），再内置正则，最后自定义正则。
+    /// 关键字按长度降序处理，避免短词先把长词切碎。
+    static func redact(_ text: String,
+                       disabledRules: Set<String> = [],
+                       customRules: [CustomRedactionRule] = [],
+                       keywords: [String] = []) -> (text: String, mappings: [Mapping]) {
         var output = text
         var mappings: [Mapping] = []
         var counters: [String: Int] = [:]
 
-        for rule in rules where !disabledRules.contains(rule.name) {
-            guard let regex = try? NSRegularExpression(pattern: rule.pattern) else { continue }
-            let matches = regex.matches(in: output, range: NSRange(output.startIndex..., in: output))
+        // 1. 关键字：纯文本匹配，不依赖正则，最可靠
+        let sorted = keywords
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.count > $1.count }
 
-            // 第一步：正序分配编号，保证占位符序号和出现顺序一致
-            var assigned: [(range: Range<String.Index>, placeholder: String)] = []
-            for match in matches {
-                guard let range = Range(match.range, in: output) else { continue }
-                let original = String(output[range])
-
-                // 同一实体多次出现复用同一个占位符
+        for keyword in sorted {
+            var cursor = output.startIndex
+            while let found = output.range(of: keyword, range: cursor..<output.endIndex) {
+                let original = String(output[found])
+                let placeholder: String
                 if let existing = mappings.first(where: { $0.original == original }) {
-                    assigned.append((range, existing.placeholder))
-                    continue
+                    placeholder = existing.placeholder
+                } else {
+                    let index = (counters["关键字"] ?? 0) + 1
+                    counters["关键字"] = index
+                    placeholder = "⟨关键字\(index)⟩"
+                    mappings.append(Mapping(placeholder: placeholder, original: original))
                 }
-
-                let index = (counters[rule.name] ?? 0) + 1
-                counters[rule.name] = index
-                let placeholder = "⟨\(rule.name)\(index)⟩"
-                mappings.append(Mapping(placeholder: placeholder, original: original))
-                assigned.append((range, placeholder))
-            }
-
-            // 第二步：倒序替换，否则前面的长度变化会让后面的 range 错位
-            for item in assigned.reversed() {
-                output.replaceSubrange(item.range, with: item.placeholder)
+                output.replaceSubrange(found, with: placeholder)
+                // 从占位符之后继续，避免占位符自身被再次命中导致死循环
+                cursor = output.index(found.lowerBound, offsetBy: placeholder.count)
             }
         }
+
+        // 2. 内置规则（长模式优先）
+        for rule in rules where !disabledRules.contains(rule.name) {
+            apply(pattern: rule.pattern, type: rule.name,
+                  to: &output, mappings: &mappings, counters: &counters)
+        }
+
+        // 3. 用户自定义正则
+        for rule in customRules where rule.enabled && !disabledRules.contains(rule.name) {
+            apply(pattern: rule.pattern, type: rule.name,
+                  to: &output, mappings: &mappings, counters: &counters)
+        }
+
         return (output, mappings)
+    }
+
+    /// 单条正则规则：正序分配编号（保证序号与出现顺序一致），倒序替换内容（避免 range 错位）
+    private static func apply(pattern: String,
+                              type: String,
+                              to output: inout String,
+                              mappings: inout [Mapping],
+                              counters: inout [String: Int]) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+        let matches = regex.matches(in: output, range: NSRange(output.startIndex..., in: output))
+
+        var assigned: [(range: Range<String.Index>, placeholder: String)] = []
+        for match in matches {
+            guard let range = Range(match.range, in: output) else { continue }
+            let original = String(output[range])
+
+            // 同一实体多次出现复用同一个占位符
+            if let existing = mappings.first(where: { $0.original == original }) {
+                assigned.append((range, existing.placeholder))
+                continue
+            }
+
+            let index = (counters[type] ?? 0) + 1
+            counters[type] = index
+            let placeholder = "⟨\(type)\(index)⟩"
+            mappings.append(Mapping(placeholder: placeholder, original: original))
+            assigned.append((range, placeholder))
+        }
+
+        for item in assigned.reversed() {
+            output.replaceSubrange(item.range, with: item.placeholder)
+        }
     }
 
     // MARK: - 还原

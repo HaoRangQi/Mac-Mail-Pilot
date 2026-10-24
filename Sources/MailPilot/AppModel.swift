@@ -452,7 +452,12 @@ final class AppModel: ObservableObject {    // 数据
         var mappings: [Redactor.Mapping] = []
 
         if decision.needsRedaction {
-            let redacted = Redactor.redact(user, disabledRules: prefs.prefs.disabledRedactionRules)
+            let redacted = Redactor.redact(
+                user,
+                disabledRules: prefs.prefs.disabledRedactionRules,
+                customRules: prefs.prefs.customRedactionRules,
+                keywords: prefs.prefs.redactionKeywords
+            )
             user = redacted.text
             mappings = redacted.mappings
         }

@@ -54,6 +54,12 @@ struct AIPreferences: Codable {
         Set(redactionRules.filter { !$0.value }.keys)
     }
 
+    /// 用户自定义的正则脱敏规则
+    var customRedactionRules: [CustomRedactionRule] = []
+
+    /// 关键字脱敏：命中即整体替换，不走正则，最可靠
+    var redactionKeywords: [String] = []
+
     func untrustedPolicy(for action: AIAction) -> UntrustedPolicy {
         untrustedPolicy[action.rawValue] ?? PrivacyDefaults.policy(for: action)
     }
@@ -104,6 +110,15 @@ enum PrivacyDefaults {
         case .reply, .translate: return .confirm
         }
     }
+}
+
+/// 用户自定义的正则脱敏规则。内置规则不可删，自定义的随便改
+struct CustomRedactionRule: Codable, Identifiable, Hashable {
+    var id: String = UUID().uuidString
+    var name: String
+    var pattern: String
+    var enabled: Bool = true
+    var hint: String = ""
 }
 
 final class AIPreferencesStore: ObservableObject {
