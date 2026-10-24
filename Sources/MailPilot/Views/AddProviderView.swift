@@ -258,6 +258,7 @@ struct AddProviderView: View {
             Button("添加") { add() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
                 .disabled(form.name.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.horizontal, 20)

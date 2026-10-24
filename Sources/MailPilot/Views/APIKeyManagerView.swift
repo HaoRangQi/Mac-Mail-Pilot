@@ -78,7 +78,8 @@ struct APIKeyManagerView: View {
                 Button("完成") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .buttonStyle(.borderedProminent)
-            }
+                    .tint(Theme.accent)
+                    }
             .padding(.horizontal, 20)
             .frame(height: 54)
         }

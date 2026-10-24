@@ -39,7 +39,9 @@ struct RootView: View {
         }
         .animation(.easeOut(duration: 0.16), value: model.showAsk)
         .preferredColorScheme(model.appearance.colorScheme)
-        .tint(Theme.accent)
+        // 不在这里全局 .tint()：macOS 的滚动条会跟着 tint 变色，
+        // 深绿 tint 会让侧边栏/列表的滚动条变成墨绿色，喧宾夺主。
+        // 强调色改为在各个主按钮上单独 .tint(Theme.accent)。
         .task { await model.load() }
         .sheet(isPresented: $model.composing) {
             ComposeView()
@@ -174,6 +176,7 @@ struct TopBar: View {
                     .padding(.horizontal, 4)
             }
             .buttonStyle(.glassProminent)
+            .tint(Theme.accent)
             .controlSize(.regular)
 
             Spacer(minLength: 8)
@@ -226,6 +229,7 @@ struct TopBar: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($searchFocused)
+                .tint(Theme.moss)
                 .onChange(of: model.query) { _, _ in model.scheduleSearch() }
             if !model.query.isEmpty {
                 Button {

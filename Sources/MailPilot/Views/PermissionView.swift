@@ -112,6 +112,7 @@ struct PermissionView: View {
                         requestAutomation()
                     }
                     .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
                     .disabled(form.automationBusy)
                 }
                 Button("打开自动化设置") { MailAutomation.openAutomationSettings() }
@@ -230,7 +231,7 @@ struct PermissionView: View {
                 Label("打开系统设置", systemImage: "gear")
             }
             .buttonStyle(.borderedProminent)
-
+            .tint(Theme.accent)
             Button(form.busy ? "检测中…" : "重新检测") {
                 Task { @MainActor in
                     form.busy = true

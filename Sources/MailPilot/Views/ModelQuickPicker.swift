@@ -134,6 +134,7 @@ struct ModelQuickPicker: View {
                     model.openSettings(tab: .providers)
                 }
                 .buttonStyle(.glassProminent)
+                .tint(Theme.accent)
                 .controlSize(.small)
                 .padding(.top, 4)
             }

@@ -256,7 +256,8 @@ struct ModelPickerView: View {
             Button("完成") { dismiss() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
-        }
+                .tint(Theme.accent)
+                }
         .padding(.horizontal, 18)
         .frame(height: 56)
     }

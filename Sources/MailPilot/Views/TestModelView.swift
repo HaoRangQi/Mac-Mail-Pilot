@@ -229,6 +229,7 @@ struct TestModelView: View {
             Button("开始") { runSingle() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
                 .disabled(form.busy || form.model.isEmpty)
         }
         .padding(.horizontal, 20)

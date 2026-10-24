@@ -44,6 +44,7 @@ struct SettingsView: View {
                     .keyboardShortcut(.cancelAction)
                     .controlSize(.small)
                     .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
             }
             .padding(.horizontal, 16)
             .frame(height: 46)

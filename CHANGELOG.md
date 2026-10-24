@@ -2,6 +2,12 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.21] - 2026-10-24
+
+### 修复
+
+- **滚动条被染成墨绿色**：根视图的全局 `.tint(Theme.accent)` 会连带影响 macOS 滚动条颜色，深绿 `#46734F` 落在滚动条上非常抢眼。改为移除全局 tint，强调色下沉到各个主按钮（`borderedProminent` / `glassProminent` 共 11 处单独 `.tint(Theme.accent)`），滚动条恢复系统默认的灰
+
 ## [0.2.20] - 2026-10-24
 
 ### 变更

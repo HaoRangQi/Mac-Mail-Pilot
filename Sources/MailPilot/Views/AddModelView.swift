@@ -89,6 +89,7 @@ struct AddModelView: View {
             Button("添加模型") { add() }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
                 .disabled(form.modelID.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.horizontal, 20)

@@ -119,7 +119,8 @@ struct OnboardingView: View {
             }
             .keyboardShortcut(.defaultAction)
             .buttonStyle(.borderedProminent)
-        }
+            .tint(Theme.accent)
+            }
         .padding(.horizontal, 20)
         .frame(height: 58)
     }
