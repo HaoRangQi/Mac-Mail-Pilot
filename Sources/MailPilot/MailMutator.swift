@@ -93,20 +93,25 @@ enum MailMutator {
                 if m is missing value then
                     repeat with j from 1 to (count of mailboxes of acct)
                         try
-                            set m to first message of mailbox j of acct whose message id is theMsgId
+                            -- 跳过空邮箱：Mail 给每个账户都建了草稿/任务/便笺/日记等空目录
+                            if (count of messages of mailbox j of acct) > 0 then
+                                set m to first message of mailbox j of acct whose message id is theMsgId
+                            end if
                         end try
                         if m is not missing value then exit repeat
                     end repeat
                 end if
             end if
 
-            -- 5. 最后兜底：不依赖账户定位，全库按 Message-ID 扫一遍
+            -- 5. 最后兜底：不依赖账户定位，全库按 Message-ID 扫一遍（跳过空邮箱）
             if m is missing value then
                 repeat with i from 1 to (count of accounts)
                     set a2 to account i
                     repeat with j from 1 to (count of mailboxes of a2)
                         try
-                            set m to first message of mailbox j of a2 whose message id is theMsgId
+                            if (count of messages of mailbox j of a2) > 0 then
+                                set m to first message of mailbox j of a2 whose message id is theMsgId
+                            end if
                         end try
                         if m is not missing value then exit repeat
                     end repeat
