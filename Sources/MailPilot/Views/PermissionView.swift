@@ -33,7 +33,7 @@ struct PermissionView: View {
             }
             .padding(22)
         }
-        .scrollIndicators(.hidden)
+        .hoverScrollIndicators()
         .task {
             form.automation = await MailAutomation.probe()
         }

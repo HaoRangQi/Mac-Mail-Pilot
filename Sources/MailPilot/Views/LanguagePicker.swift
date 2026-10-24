@@ -130,7 +130,7 @@ struct LanguagePickerButton: View {
                 }
                 .padding(.vertical, 4)
             }
-            .scrollIndicators(.hidden)
+            .hoverScrollIndicators()
         }
         .frame(width: 240, height: 320)
     }

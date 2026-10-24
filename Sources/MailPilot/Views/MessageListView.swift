@@ -15,7 +15,7 @@ struct MessageListView: View {
                     }
                 }
             }
-            .scrollIndicators(.hidden)
+            .hoverScrollIndicators()
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .glassPanel()

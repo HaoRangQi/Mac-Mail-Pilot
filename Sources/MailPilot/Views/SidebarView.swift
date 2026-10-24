@@ -36,7 +36,7 @@ struct SidebarView: View {
             }
             .padding(.bottom, 16)
         }
-        .scrollIndicators(.hidden)
+        .hoverScrollIndicators()
         .frame(maxHeight: .infinity, alignment: .top)
         .glassPanel()
     }

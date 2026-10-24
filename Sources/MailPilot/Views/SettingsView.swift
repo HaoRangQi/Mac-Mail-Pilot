@@ -123,7 +123,7 @@ struct SettingsView: View {
                 }
                 .padding(.horizontal, 8)
             }
-            .scrollIndicators(.hidden)
+            .hoverScrollIndicators()
 
             Divider().opacity(0.6)
 
@@ -190,7 +190,7 @@ struct SettingsView: View {
                 }
                 .padding(22)
             }
-            .scrollIndicators(.hidden)
+            .hoverScrollIndicators()
             .confirmationDialog(
                 "删除该服务商？",
                 isPresented: Binding(

@@ -2,6 +2,12 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.23] - 2026-10-24
+
+### 变更
+
+- **滚动条改为悬停显示**：新增 `hoverScrollIndicators()` 修饰符，默认 `.hidden`，鼠标移入该区域才切 `.visible`，移出即隐藏。15 处滚动区域全部改用它
+
 ## [0.2.22] - 2026-10-24
 
 ### 变更

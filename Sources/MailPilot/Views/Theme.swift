@@ -98,12 +98,32 @@ extension View {
         self.glassEffect(.regular, in: .rect(cornerRadius: radius))
     }
 
+    /// 滚动条默认隐藏，鼠标移入才显示。
+    /// macOS 没有「hover 才出 scroller」的原生开关，只能自己用 onHover 切 scrollIndicators。
+    func hoverScrollIndicators() -> some View {
+        modifier(HoverScrollIndicators())
+    }
+
     func faintSeparator() -> some View {
         self.overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.06))
                 .frame(height: 1)
         }
+    }
+}
+
+final class ScrollHoverState: ObservableObject {
+    @Published var hovering = false
+}
+
+struct HoverScrollIndicators: ViewModifier {
+    @StateObject private var state = ScrollHoverState()
+
+    func body(content: Content) -> some View {
+        content
+            .scrollIndicators(state.hovering ? .visible : .hidden)
+            .onHover { state.hovering = $0 }
     }
 }
 
