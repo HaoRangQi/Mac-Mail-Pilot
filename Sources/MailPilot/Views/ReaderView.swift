@@ -45,6 +45,20 @@ struct ReaderView: View {
         } message: {
             Text(sendConfirmMessage)
         }
+        .alert(
+            "确认发送到第三方模型？",
+            isPresented: Binding(
+                get: { model.pendingAI != nil },
+                set: { presented in if !presented { model.pendingAI = nil } }
+            )
+        ) {
+            Button("发送", role: .destructive) {
+                model.confirmPendingAI()
+            }
+            Button("取消", role: .cancel) { model.pendingAI = nil }
+        } message: {
+            Text(pendingAIMessage)
+        }
     }
 
     private var emptyState: some View {
@@ -345,6 +359,27 @@ struct ReaderView: View {
             ? message.subject
             : "Re: \(message.subject)"
         return "收件人：\(message.displaySender) <\(message.senderEmail)>\n主题：\(subject)\n\n发送后无法撤回。"
+    }
+
+    /// 外发确认框：写清楚发给谁、发了多少、有没有脱敏
+    private var pendingAIMessage: String {
+        guard let request = model.pendingAI else { return "" }
+        let actionName: String
+        switch request.action {
+        case .summarize: actionName = "摘要"
+        case .reply: actionName = "草拟回复"
+        case .classify: actionName = "分类"
+        case .translate: actionName = "翻译"
+        }
+        var text = "动作：\(actionName)\n"
+        text += "发送到：\(request.provider.name)（\(request.provider.baseURL)）\n"
+        text += "内容量：\(request.charCount) 字符\n"
+        if request.mappings.isEmpty {
+            text += "未脱敏：邮件内容将原样发送"
+        } else {
+            text += "已脱敏：\(Redactor.summary(request.mappings))"
+        }
+        return text
     }
 
     /// 收件人 / 抄送 / 密送 统一行：标签固定宽度让三行对齐，空列表整行不渲染

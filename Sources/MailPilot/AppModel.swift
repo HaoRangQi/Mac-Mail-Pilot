@@ -110,6 +110,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var deleting = false
     /// 待确认发送的 AI 正文（非 nil 时弹确认框）
     @Published var pendingAISend: String?
+    /// 待确认的 AI 请求（不可信模型 + 会生成对外内容时弹框）
+    @Published var pendingAI: PendingAIRequest?
     @Published var showOnboarding = false
 
     // 设置
@@ -320,55 +322,46 @@ final class AppModel: ObservableObject {    // 数据
 
     func summarize() {
         guard let m = selected else { return }
-        aiBusy = true
-        aiOutput = nil
         aiAction = .summarize
         aiEditing = false
-        Task { @MainActor in
-            await self.run(prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
-                           message: m,
-                           fallback: { Self.localSummary(m) })
-        }
+        aiOutput = nil
+        requestAI(action: .summarize,
+                  prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
+                  message: m,
+                  fallback: { Self.localSummary(m) })
     }
 
     func draftReply(instruction: String = "") {
         guard let m = selected else { return }
-        aiBusy = true
-        aiOutput = nil
+        let prompt = "基于这封邮件，用专业简洁的中文草拟一封回复" +
+            (instruction.isEmpty ? "" : "，要求：\(instruction)") + "。只输出回复正文。"
         aiAction = .reply
         aiEditing = false
-        Task { @MainActor in
-            let prompt = "基于这封邮件，用专业简洁的中文草拟一封回复" +
-                (instruction.isEmpty ? "" : "，要求：\(instruction)") + "。只输出回复正文。"
-            await self.run(prompt: prompt, message: m, fallback: { Self.localReply(m) })
-        }
+        aiOutput = nil
+        requestAI(action: .reply, prompt: prompt, message: m, fallback: { Self.localReply(m) })
     }
 
     func classify() {
         guard let m = selected else { return }
-        aiBusy = true
-        aiOutput = nil
         aiAction = .classify
         aiEditing = false
-        Task { @MainActor in
-            await self.run(prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
-                           message: m,
-                           fallback: { Self.localClassify(m) })
-        }
+        aiOutput = nil
+        requestAI(action: .classify,
+                  prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
+                  message: m,
+                  fallback: { Self.localClassify(m) })
     }
 
     func translate() {
         guard let m = selected else { return }
-        aiBusy = true
-        aiOutput = nil
+        let target = prefs.prefs.translateTarget
         aiAction = .translate
         aiEditing = false
-        let target = prefs.prefs.translateTarget
-        Task { @MainActor in
-            await self.run(prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
-                           message: m,
-                           fallback: { "（未配置模型，无法翻译）" })
-        }
+        aiOutput = nil
+        requestAI(action: .translate,
+                  prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
+                  message: m,
+                  fallback: { "（未配置模型，无法翻译）" })
     }
 
     /// 根据最近收件箱生成「我的简介」
@@ -409,26 +402,91 @@ final class AppModel: ObservableObject {    // 数据
         sentSamples = Array(samples.prefix(3))
     }
 
-    private func run(prompt: String, message: Message, fallback: () -> String) async {
-        let system = prefs.systemPrompt(styleSamples: sentSamples)
+    /// 待确认的 AI 请求（不可信模型 + 会产生对外内容的动作时弹框）
+    struct PendingAIRequest {
+        let action: AIAction
+        let provider: AIProvider
+        let system: String
+        let user: String
+        let fallbackText: String
+        let mappings: [Redactor.Mapping]
+        let charCount: Int
+    }
+
+    /// 所有 AI 调用的唯一入口：查策略 → 脱敏 → 需要确认则挂起 → 发送 → 还原。
+    /// 不要在各处手写 if，规则只在 TrustPolicy 一处。
+    private func requestAI(action: AIAction,
+                           prompt: String,
+                           message: Message,
+                           fallback: () -> String) {
+        let fallbackText = fallback()
+
         guard let provider = ai.activeProvider else {
-            aiOutputTrusted = true          // 本地兜底，数据没出本机
-            aiOutput = fallback() + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
-            aiBusy = false
+            aiOutputTrusted = true
+            aiOutput = fallbackText + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
             return
         }
-        // 记录本次数据去了哪：不可信模型时界面要标出来
-        aiOutputTrusted = provider.isTrusted(provider.selectedModel)
-        do {
-            let text = try await AIService.chat(provider: provider,
-                                                system: system,
-                                                user: prompt + "\n\n" + context(message))
-            aiOutput = text
-        } catch {
-            aiOutputTrusted = true          // 失败后走的是本地结果
-            aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n" + fallback()
+
+        let decision = TrustPolicy.decide(action: action, provider: provider, model: provider.selectedModel)
+        if case .deny(let reason) = decision {
+            aiOutput = "已拒绝：\(reason)"
+            return
         }
-        aiBusy = false
+
+        let system = prefs.systemPrompt(styleSamples: sentSamples)
+        var user = prompt + "\n\n" + context(message)
+        var mappings: [Redactor.Mapping] = []
+
+        if decision.needsRedaction {
+            let redacted = Redactor.redact(user)
+            user = redacted.text
+            mappings = redacted.mappings
+        }
+
+        aiOutputTrusted = provider.isTrusted(provider.selectedModel)
+
+        let request = PendingAIRequest(
+            action: action,
+            provider: provider,
+            system: system,
+            user: user,
+            fallbackText: fallbackText,
+            mappings: mappings,
+            charCount: user.count
+        )
+
+        if decision.needsConfirmation {
+            pendingAI = request
+            return
+        }
+        performAI(request)
+    }
+
+    /// 用户确认后继续
+    func confirmPendingAI() {
+        guard let request = pendingAI else { return }
+        pendingAI = nil
+        performAI(request)
+    }
+
+    private func performAI(_ request: PendingAIRequest) {
+        aiBusy = true
+        Task { @MainActor in
+            do {
+                let text = try await AIService.chat(
+                    provider: request.provider,
+                    system: request.system,
+                    user: request.user
+                )
+                aiOutput = request.mappings.isEmpty
+                    ? text
+                    : Redactor.restore(text, request.mappings)
+            } catch {
+                aiOutputTrusted = true   // 失败后是本地结果，数据没外发
+                aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n\(request.fallbackText)"
+            }
+            aiBusy = false
+        }
     }
 
     static func localSummary(_ m: Message) -> String {
