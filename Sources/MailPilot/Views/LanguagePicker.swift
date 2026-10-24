@@ -144,7 +144,7 @@ struct LanguagePickerButton: View {
             HStack(spacing: 8) {
                 Text(language.zh)
                     .font(.system(size: 12.5))
-                    .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                    .foregroundStyle(selected ? Theme.accent : Color.primary)
                 Text(language.en)
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
@@ -152,12 +152,12 @@ struct LanguagePickerButton: View {
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Theme.accent)
                 }
             }
             .padding(.horizontal, 12)
             .frame(height: 28)
-            .background(selected ? Color.accentColor.opacity(0.08) : Color.clear)
+            .background(selected ? Theme.accent.opacity(0.08) : Color.clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

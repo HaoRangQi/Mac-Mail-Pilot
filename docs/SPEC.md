@@ -83,7 +83,8 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 - "按提示找邮件 → 确认批量处理"的完整交互（AI 目前只能回答，不能执行动作）
 - 附件保存、规则、归档、会话视图
-- **邮件正文渲染**：纯文本邮件的 HTML 版本里，`<style>` 块中的 CSS 被当成正文显示（截图可见 `html { -webkit-text-size-adjust:none; }` 之类），需要剥离 style/script 整块并保留可读排版
+- **邮件正文渲染（当前体验最差的一环，优先修）**：0.2.9 已修掉「`<style>` 里的 CSS 源码混进正文」，但本质仍是 **HTML → 纯文本**，加粗、斜体、链接、列表层级、引用、表格、内嵌图片全部丢失，长邮件读起来就是一坨等宽文字。要做真渲染：用 `WKWebView` 加载原始 HTML（或 `NSAttributedString(data:options:)` 走富文本），需一并处理——远程图片加载策略（默认禁用以保护隐私，给「显示图片」按钮）、链接点击交给系统浏览器、禁用 JS、深色模式下强制文字颜色可读、正文高度自适应
+
 - （可选）固定签名证书免除每次编译后重授权（FDA 与自动化都受益）。用户目前接受手动重新授权，暂缓；若重启此项，注意上次失败的根因是 openssl 3 默认用 AES-256-CBC + SHA256 导出 PKCS12，macOS `security import` 不认——加 `-legacy`（或 `-macalg sha1 -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES`）可解决；证书还需带 `extendedKeyUsage=codeSigning` 才会被 `codesign` 识别
 
 ## 5. 已知约束

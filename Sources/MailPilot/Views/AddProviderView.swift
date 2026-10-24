@@ -193,7 +193,7 @@ struct AddProviderView: View {
                      : "推荐使用本地模型：邮件内容不会离开这台电脑")
                     .font(.system(size: 10.5))
             }
-            .foregroundStyle(form.kind.isLocal ? Color.green : Color.secondary)
+            .foregroundStyle(form.kind.isLocal ? Theme.moss : Color.secondary)
 
             TextField("Base URL：https://example.com", text: $form.baseURL)
                 .textFieldStyle(.plain)

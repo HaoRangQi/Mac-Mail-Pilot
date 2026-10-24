@@ -66,7 +66,7 @@ struct OnboardingView: View {
             if let hint = ui.hint {
                 Text(hint)
                     .font(.system(size: 11))
-                    .foregroundStyle(ui.failed ? Color.red : Color.secondary)
+                    .foregroundStyle(ui.failed ? Theme.brick : Color.secondary)
             }
         }
         .padding(.horizontal, 20)

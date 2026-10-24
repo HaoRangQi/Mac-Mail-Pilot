@@ -225,7 +225,7 @@ struct APIKeyManagerView: View {
                 .padding(.horizontal, 9)
                 .frame(width: 96, height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(0.6), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.accent.opacity(0.6), lineWidth: 1))
 
             TextField("输入 API 密钥", text: $form.newValue)
                 .textFieldStyle(.plain)
@@ -233,7 +233,7 @@ struct APIKeyManagerView: View {
                 .padding(.horizontal, 9)
                 .frame(height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.accentColor.opacity(0.6), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Theme.accent.opacity(0.6), lineWidth: 1))
 
             iconButton("checkmark", color: .accentColor) {
                 guard !form.newValue.trimmingCharacters(in: .whitespaces).isEmpty else {

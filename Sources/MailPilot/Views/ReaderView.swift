@@ -160,10 +160,10 @@ struct ReaderView: View {
                     } label: {
                         Image(systemName: "trash")
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.red)
+                            .foregroundStyle(Theme.brick)
                             .frame(width: 27, height: 27)
-                            .background(Color.red.opacity(0.10), in: Circle())
-                            .overlay(Circle().stroke(Color.red.opacity(0.20), lineWidth: 0.5))
+                            .background(Theme.brick.opacity(0.10), in: Circle())
+                            .overlay(Circle().stroke(Theme.brick.opacity(0.20), lineWidth: 0.5))
                     }
                     .buttonStyle(.plain)
                     .help("移入「邮件」App 的废纸篓")

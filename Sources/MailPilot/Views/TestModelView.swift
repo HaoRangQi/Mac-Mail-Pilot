@@ -130,7 +130,7 @@ struct TestModelView: View {
                     .frame(height: 30)
                     .background(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color.accentColor)
+                            .fill(Theme.accent)
                     )
                     .opacity(form.busy || form.model.isEmpty ? 0.4 : 1)
                     .contentShape(Rectangle())
@@ -194,7 +194,7 @@ struct TestModelView: View {
                         HStack(spacing: 6) {
                             Image(systemName: item.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
                                 .font(.system(size: 10.5))
-                                .foregroundStyle(item.ok ? Color.green : Color.red)
+                                .foregroundStyle(item.ok ? Theme.moss : Theme.brick)
                             Text(item.model)
                                 .font(.system(size: 11.5, design: .monospaced))
                                 .lineLimit(1)

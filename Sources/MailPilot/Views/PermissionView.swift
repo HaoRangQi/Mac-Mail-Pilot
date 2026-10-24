@@ -45,10 +45,10 @@ struct PermissionView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: authorized ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
                 .font(.system(size: 22))
-                .foregroundStyle(authorized ? Color.green : Color.orange)
+                .foregroundStyle(authorized ? Theme.moss : Theme.gold)
                 .frame(width: 44, height: 44)
                 .background(
-                    (authorized ? Color.green : Color.orange).opacity(0.12),
+                    (authorized ? Theme.moss : Theme.gold).opacity(0.12),
                     in: RoundedRectangle(cornerRadius: 11)
                 )
 
@@ -258,7 +258,7 @@ struct PermissionView: View {
             if let hint = form.hint {
                 Text(hint)
                     .font(.system(size: 11))
-                    .foregroundStyle(form.failed ? Color.red : Color.secondary)
+                    .foregroundStyle(form.failed ? Theme.brick : Color.secondary)
             }
             Text("修改权限后如果仍检测不到，请退出 MailPilot 再重新打开——权限只对新启动的进程生效。")
                 .font(.system(size: 10.5))

@@ -130,14 +130,14 @@ struct AskBar: View {
                 if model.askSelectMode {
                     Image(systemName: model.askSelected.contains(turn.id) ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 11))
-                        .foregroundStyle(model.askSelected.contains(turn.id) ? Color.accentColor : Color.secondary.opacity(0.5))
+                        .foregroundStyle(model.askSelected.contains(turn.id) ? Theme.accent : Color.secondary.opacity(0.5))
                 }
 
                 Text(turn.question)
                     .font(.system(size: 11.5))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -295,7 +295,7 @@ struct AskBar: View {
                 HStack(spacing: 8) {
                     Image(systemName: model.askAllAccounts ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 11))
-                        .foregroundStyle(model.askAllAccounts ? Color.accentColor : Color.secondary.opacity(0.5))
+                        .foregroundStyle(model.askAllAccounts ? Theme.accent : Color.secondary.opacity(0.5))
                     VStack(alignment: .leading, spacing: 1) {
                         Text("所有账号").font(.system(size: 12))
                         Text("\(model.accounts.count) 个账号的邮件")
@@ -340,7 +340,7 @@ struct AskBar: View {
             HStack(spacing: 8) {
                 Image(systemName: picked ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 11))
-                    .foregroundStyle(picked ? Color.accentColor : Color.secondary.opacity(0.5))
+                    .foregroundStyle(picked ? Theme.accent : Color.secondary.opacity(0.5))
                 Text(account.name)
                     .font(.system(size: 11.5))
                     .foregroundStyle(dimmed ? Color.secondary : Color.primary)
@@ -378,7 +378,7 @@ struct AskBar: View {
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 15))
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
             } else if !model.askHistory.isEmpty {

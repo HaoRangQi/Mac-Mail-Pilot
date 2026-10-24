@@ -35,6 +35,7 @@ struct RootView: View {
         }
         .animation(.easeOut(duration: 0.16), value: model.showAsk)
         .preferredColorScheme(model.appearance.colorScheme)
+        .tint(Theme.accent)
         .task { await model.load() }
         .sheet(isPresented: $model.composing) {
             ComposeView()
@@ -94,7 +95,7 @@ struct TopBar: View {
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 9)
                     .frame(height: 24)
-                    .background(Color.orange.opacity(0.12), in: Capsule())
+                    .background(Theme.gold.opacity(0.12), in: Capsule())
             }
 
             Button {

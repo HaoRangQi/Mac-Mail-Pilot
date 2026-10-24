@@ -193,7 +193,7 @@ struct ModelPickerView: View {
             HStack(spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 12))
-                    .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.45))
+                    .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.45))
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider?.displayName(for: model) ?? model)
@@ -230,7 +230,7 @@ struct ModelPickerView: View {
 
                 Image(systemName: selected ? "minus.circle" : "plus.circle")
                     .font(.system(size: 13))
-                    .foregroundStyle(selected ? Color.red.opacity(0.75) : Color.accentColor)
+                    .foregroundStyle(selected ? Theme.brick.opacity(0.75) : Theme.accent)
             }
             .padding(.horizontal, 8)
             .frame(height: 36)

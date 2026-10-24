@@ -165,7 +165,7 @@ struct SettingsView: View {
         .frame(height: 30)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.15) : Color.clear)
+                .fill(selected ? Theme.accent.opacity(0.15) : Color.clear)
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -243,9 +243,9 @@ struct SettingsView: View {
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(Color.red.opacity(0.9))
+                    .foregroundStyle(Theme.brick.opacity(0.9))
                     .frame(width: 28, height: 28)
-                    .background(Color.red.opacity(0.10), in: Circle())
+                    .background(Theme.brick.opacity(0.10), in: Circle())
             }
             .buttonStyle(.plain)
             .help("删除该服务商")
@@ -333,7 +333,7 @@ struct SettingsView: View {
                 if let status = form.status {
                     Text(status)
                         .font(.system(size: 10.5))
-                        .foregroundStyle(status.hasPrefix("失败") ? Color.red : Color.secondary)
+                        .foregroundStyle(status.hasPrefix("失败") ? Theme.brick : Color.secondary)
                         .lineLimit(1)
                 }
             }
@@ -374,7 +374,7 @@ struct SettingsView: View {
                      : "推荐使用本地模型：邮件内容不会离开这台电脑")
                     .font(.system(size: 10.5))
             }
-            .foregroundStyle(provider.kind.isLocal ? Color.green : Color.secondary)
+            .foregroundStyle(provider.kind.isLocal ? Theme.moss : Color.secondary)
         }
     }
 
@@ -451,7 +451,7 @@ struct SettingsView: View {
         return HStack(spacing: 8) {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
                 .font(.system(size: 11))
-                .foregroundStyle(selected ? Color.accentColor : Color.secondary.opacity(0.6))
+                .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.6))
             Text(provider.displayName(for: model))
                 .font(.system(size: 12))
                 .lineLimit(1)

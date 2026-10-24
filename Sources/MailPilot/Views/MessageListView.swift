@@ -42,7 +42,7 @@ struct MessageListView: View {
         } label: {
             HStack(alignment: .top, spacing: 8) {
                 Circle()
-                    .fill(Color.accentColor)
+                    .fill(Theme.accent)
                     .frame(width: 6, height: 6)
                     .padding(.top, 6)
                     .opacity(message.unread ? 1 : 0)
@@ -77,7 +77,7 @@ struct MessageListView: View {
             .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(active ? Color.accentColor.opacity(0.12) : Color.clear)
+                    .fill(active ? Theme.accent.opacity(0.12) : Color.clear)
             )
             .padding(.horizontal, 6)
             .contentShape(Rectangle())
