@@ -13,7 +13,7 @@ struct AboutView: View {
             }
             .padding(22)
         }
-        .scrollIndicators(.visible)
+        .scrollIndicators(.hidden)
     }
 
     private var header: some View {

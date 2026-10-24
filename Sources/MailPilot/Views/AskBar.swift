@@ -112,7 +112,7 @@ struct AskBar: View {
                 .padding(.horizontal, 2)
                 .padding(.vertical, 2)
             }
-            .scrollIndicators(.visible)
+            .scrollIndicators(.hidden)
             .frame(maxHeight: 280)
             .onChange(of: model.askHistory.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
@@ -326,7 +326,7 @@ struct AskBar: View {
                 }
             }
             .frame(height: 240)
-            .scrollIndicators(.visible)
+            .scrollIndicators(.hidden)
         }
         .frame(width: 300)
     }

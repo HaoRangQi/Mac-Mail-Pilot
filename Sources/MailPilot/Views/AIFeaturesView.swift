@@ -150,7 +150,7 @@ struct AIFeaturesView: View {
             }
             .padding(22)
         }
-        .scrollIndicators(.visible)
+        .scrollIndicators(.hidden)
         .sheet(item: $ui.editor) { editor in
             switch editor {
             case .profile:

@@ -48,7 +48,7 @@ struct AddModelView: View {
                 }
                 .padding(20)
             }
-            .scrollIndicators(.visible)
+            .scrollIndicators(.hidden)
 
             Divider().opacity(0.5)
             footer

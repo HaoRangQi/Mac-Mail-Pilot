@@ -171,7 +171,7 @@ struct ReaderView: View {
                 .padding(.top, 22)
                 .padding(.bottom, 20)
             }
-            .scrollIndicators(.visible)
+            .scrollIndicators(.hidden)
 
             aiBar
         }

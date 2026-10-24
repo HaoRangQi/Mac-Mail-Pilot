@@ -50,7 +50,7 @@ struct AddProviderView: View {
                 }
                 .padding(22)
             }
-            .scrollIndicators(.visible)
+            .scrollIndicators(.hidden)
 
             Divider().opacity(0.5)
             footer

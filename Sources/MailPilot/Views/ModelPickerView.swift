@@ -181,7 +181,7 @@ struct ModelPickerView: View {
             }
             .padding(.horizontal, 12)
         }
-        .scrollIndicators(.visible)
+        .scrollIndicators(.hidden)
     }
 
     private func row(_ model: String) -> some View {
