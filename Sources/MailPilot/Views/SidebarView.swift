@@ -20,7 +20,7 @@ struct SidebarView: View {
                     smartRow(.today)
                 }
 
-                ForEach(model.accounts) { account in
+                ForEach(visibleAccounts) { account in
                     sectionHeader(
                         account.name,
                         key: account.id,
@@ -28,7 +28,7 @@ struct SidebarView: View {
                         badge: unreadCount(for: account)
                     )
                     if !model.collapsedSections.contains(account.id) {
-                        ForEach(model.mailboxes.filter { $0.accountID == account.id }) { box in
+                        ForEach(visibleBoxes(for: account)) { box in
                             mailboxRow(box)
                         }
                     }
@@ -42,6 +42,19 @@ struct SidebarView: View {
     }
 
     // MARK: - 分组头
+
+    /// 只显示有内容的账户：14 个账户里有多个是空的（只有内部文件夹），全列出来只是噪音
+    private var visibleAccounts: [Account] {
+        model.accounts.filter { !visibleBoxes(for: $0).isEmpty }
+    }
+
+    /// 标准邮箱（收件箱/已发送/草稿/废纸篓/归档）始终显示；
+    /// 自定义文件夹只在真的装了邮件时才显示
+    private func visibleBoxes(for account: Account) -> [Mailbox] {
+        model.mailboxes.filter {
+            $0.accountID == account.id && ($0.role != .custom || $0.total > 0)
+        }
+    }
 
     private func sectionHeader(_ title: String, key: String, topPadding: CGFloat = 10, badge: Int = 0) -> some View {
         let collapsed = model.collapsedSections.contains(key)

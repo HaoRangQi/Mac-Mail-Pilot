@@ -300,6 +300,14 @@ final class NativeMailStore: MailStore {
         "账户 " + String(id.prefix(6))
     }
 
+    /// 「邮件」App 给每个账户都建的一套内部文件夹（任务 / 便笺 / 日记 / 对话历史记录…），
+    /// 不是用户邮箱，绝大多数永远为空，侧边栏不该显示
+    private static let internalMailboxNames: Set<String> = [
+        "任务", "便笺", "发件箱", "日记", "对话历史记录", "模板", "已屏蔽",
+        "todo", "to do", "notes", "journal", "outbox", "templates", "blocked",
+        "conversation history", "sendlater", "send later",
+    ]
+
     private func discoverMailboxes() -> [Mailbox] {
         let fm = FileManager.default
         guard let accounts = try? fm.contentsOfDirectory(at: root,
@@ -314,6 +322,7 @@ final class NativeMailStore: MailStore {
             for boxURL in findMboxDirectories(in: account, depth: 0) {
                 let rel = relativePath(boxURL)
                 let name = boxURL.deletingPathExtension().lastPathComponent
+                guard !Self.internalMailboxNames.contains(name.lowercased()) else { continue }
                 result.append(Mailbox(
                     id: "native:" + rel,
                     accountID: accountID,
@@ -364,13 +373,16 @@ final class NativeMailStore: MailStore {
         return map[raw.uppercased()] ?? raw
     }
 
+    /// 角色判定：必须同时认英文与中文目录名。
+    /// 中文账户的收件箱目录就叫「收件箱」，早期只匹配 INBOX，导致所有邮箱都落进 custom——
+    /// 智能邮箱聚合、账户地址推断（依赖 role == .sent / .inbox）跟着一起失效。
     private func role(for raw: String) -> Mailbox.Role {
         switch raw.uppercased() {
-        case "INBOX": return .inbox
-        case "SENT", "SENT MESSAGES", "SENT MAIL": return .sent
-        case "DRAFTS", "DRAFT": return .drafts
-        case "TRASH", "DELETED MESSAGES", "BIN": return .trash
-        case "ARCHIVE": return .archive
+        case "INBOX", "收件箱", "收件匣": return .inbox
+        case "SENT", "SENT MESSAGES", "SENT MAIL", "已发送邮件", "已发送", "已寄邮件": return .sent
+        case "DRAFTS", "DRAFT", "草稿", "草稿箱": return .drafts
+        case "TRASH", "DELETED MESSAGES", "BIN", "已删除邮件", "已删除", "废纸篓", "垃圾桶": return .trash
+        case "ARCHIVE", "归档", "存档": return .archive
         default: return .custom
         }
     }
