@@ -59,6 +59,15 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
+/// 阅读页 AI 动作类型。决定生成结果下方给哪些操作按钮：
+/// 摘要 / 分类只要复制；只有回复才需要编辑、存草稿、发送。
+enum AIAction {
+    case summarize
+    case reply
+    case classify
+    case translate
+}
+
 struct AskTurn: Identifiable, Codable, Hashable {
     var id: String = UUID().uuidString
     var question: String
@@ -86,6 +95,11 @@ final class AppModel: ObservableObject {    // 数据
     @Published var isDemo = true
     @Published var aiOutput: String?
     @Published var aiBusy = false
+    /// 这次输出是哪个动作产生的——决定下方按钮给哪些（摘要不需要「存草稿/发送」）
+    @Published var aiAction: AIAction?
+    /// 回复草稿的编辑态
+    @Published var aiEditing = false
+    @Published var aiDraftText = ""
     @Published var composing = false
     @Published var showSettings = false
     @Published var pendingDelete: Message?
@@ -241,6 +255,8 @@ final class AppModel: ObservableObject {    // 数据
         selectedMailboxID = id
         selected = nil
         aiOutput = nil
+        aiAction = nil
+        aiEditing = false
         query = ""
         if showAsk { syncAskScopeToSelection() }
         await loadMessages()
@@ -259,6 +275,8 @@ final class AppModel: ObservableObject {    // 数据
     func open(_ message: Message) async {
         selected = message
         aiOutput = nil
+        aiAction = nil
+        aiEditing = false
         if message.unread, let idx = messages.firstIndex(where: { $0.id == message.id }) {
             messages[idx].unread = false
         }
@@ -302,6 +320,8 @@ final class AppModel: ObservableObject {    // 数据
         guard let m = selected else { return }
         aiBusy = true
         aiOutput = nil
+        aiAction = .summarize
+        aiEditing = false
         Task { @MainActor in
             await self.run(prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
                            message: m,
@@ -313,6 +333,8 @@ final class AppModel: ObservableObject {    // 数据
         guard let m = selected else { return }
         aiBusy = true
         aiOutput = nil
+        aiAction = .reply
+        aiEditing = false
         Task { @MainActor in
             let prompt = "基于这封邮件，用专业简洁的中文草拟一封回复" +
                 (instruction.isEmpty ? "" : "，要求：\(instruction)") + "。只输出回复正文。"
@@ -324,6 +346,8 @@ final class AppModel: ObservableObject {    // 数据
         guard let m = selected else { return }
         aiBusy = true
         aiOutput = nil
+        aiAction = .classify
+        aiEditing = false
         Task { @MainActor in
             await self.run(prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
                            message: m,
@@ -335,6 +359,8 @@ final class AppModel: ObservableObject {    // 数据
         guard let m = selected else { return }
         aiBusy = true
         aiOutput = nil
+        aiAction = .translate
+        aiEditing = false
         let target = prefs.prefs.translateTarget
         Task { @MainActor in
             await self.run(prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
@@ -481,6 +507,24 @@ final class AppModel: ObservableObject {    // 数据
     }
 
     // MARK: - AI 结果交付（作为当前邮件的回复）
+
+    /// 进入回复草稿的编辑态
+    func beginEditingAI() {
+        aiDraftText = aiOutput ?? ""
+        aiEditing = true
+    }
+
+    /// 退出编辑态，把修改写回输出
+    func finishEditingAI() {
+        let text = aiDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty { aiOutput = aiDraftText }
+        aiEditing = false
+    }
+
+    /// 当前可交付的文本：编辑态取编辑框，否则取原始输出
+    var aiDeliverableText: String {
+        aiEditing ? aiDraftText : (aiOutput ?? "")
+    }
 
     /// 把 AI 生成的正文当作回复：存进「邮件」草稿箱，或直接发送。
     /// 收件人取原邮件的发件人，主题补 Re:，发件账号取原邮件所属账户。

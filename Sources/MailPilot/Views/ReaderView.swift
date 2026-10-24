@@ -231,28 +231,56 @@ struct ReaderView: View {
 
             if let output = model.aiOutput {
                 VStack(alignment: .leading, spacing: 9) {
-                    ScrollView {
-                        Text(output)
+                    if model.aiEditing {
+                        TextEditor(text: $model.aiDraftText)
                             .font(.system(size: 12.5))
-                            .lineSpacing(4)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .scrollContentBackground(.hidden)
+                            .frame(height: 150)
+                            .padding(9)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+                    } else {
+                        ScrollView {
+                            Text(output)
+                                .font(.system(size: 12.5))
+                                .lineSpacing(4)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxHeight: 150)
+                        .padding(11)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
                     }
-                    .frame(maxHeight: 150)
-                    .padding(11)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
 
                     HStack(spacing: 8) {
-                        resultButton("复制", icon: "doc.on.doc", tint: .secondary) {
-                            copyToPasteboard(output)
-                            model.showToast("已复制生成内容")
+                        if model.aiEditing {
+                            resultButton("完成", icon: "checkmark", tint: Theme.moss) {
+                                model.finishEditingAI()
+                            }
+                        } else {
+                            // 复制对所有动作通用
+                            resultButton("复制", icon: "doc.on.doc", tint: .secondary) {
+                                copyToPasteboard(output)
+                                model.showToast("已复制")
+                            }
+                            // 只有回复草稿需要编辑
+                            if model.aiAction == .reply {
+                                resultButton("编辑", icon: "pencil", tint: .secondary) {
+                                    model.beginEditingAI()
+                                }
+                            }
                         }
-                        resultButton("存草稿", icon: "tray.and.arrow.down", tint: .secondary) {
-                            Task { await model.deliverAIOutput(output, asDraft: true) }
+
+                        // 存草稿 / 发送只对回复有意义，摘要与分类没有收件人概念
+                        if model.aiAction == .reply {
+                            resultButton("存草稿", icon: "tray.and.arrow.down", tint: .secondary) {
+                                let text = model.aiDeliverableText
+                                Task { await model.deliverAIOutput(text, asDraft: true) }
+                            }
+                            resultButton("发送", icon: "paperplane.fill", tint: Theme.moss) {
+                                model.pendingAISend = model.aiDeliverableText
+                            }
                         }
-                        resultButton("发送", icon: "paperplane.fill", tint: Theme.moss) {
-                            model.pendingAISend = output
-                        }
+
                         Spacer()
                     }
                 }
