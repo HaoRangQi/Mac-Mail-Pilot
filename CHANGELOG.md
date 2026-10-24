@@ -2,6 +2,19 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.16] - 2026-10-24
+
+### 新增
+
+- **撰写窗口完整字段**：发件人（下拉选择账号）、收件人、抄送、密送、主题、正文。发件人显示为「账户名 · 邮箱」，`sender` 用 try 包住——地址不在 Mail 里时自动退回默认账号，不会让整封信发不出去
+- `MailSender.compose(from:to:cc:bcc:subject:body:sendNow:)` 支持指定发件账号与 Cc/Bcc；原来只有 `viaAppleScript(to:subject:body:sendNow:)`，只能填收件人
+
+### 变更
+
+- 发送按钮合并为一个：勾选「直接发送」立即投递，不勾选只打开「邮件」撰写窗口由人工点发送。去掉原来并列的「mailto 打开 / AppleScript 打开」两个按钮
+- 发送改到后台线程执行（SMTP 投递可能耗时数秒），期间按钮显示「处理中…」
+- `NativeMailStore.accounts()` 补上邮箱地址（此前恒为空串），发件人下拉才能显示真实地址
+
 ## [0.2.15] - 2026-10-24
 
 ### 变更

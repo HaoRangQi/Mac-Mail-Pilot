@@ -41,9 +41,20 @@ enum MailSender {
     // MARK: - 路径二：AppleScript
 
     /// 正文与主题走临时文件传入，避免 AppleScript 字符串转义的坑。
-    static func viaAppleScript(to: [String], subject: String, body: String, sendNow: Bool) throws {
-        let addresses = to.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        guard !addresses.isEmpty else { throw MailSenderError.emptyRecipient }
+    /// `from` 为空时不设置 sender，由「邮件」App 用默认账号。
+    static func compose(from: String,
+                        to: [String],
+                        cc: [String],
+                        bcc: [String],
+                        subject: String,
+                        body: String,
+                        sendNow: Bool) throws {
+        let toList = clean(to)
+        let ccList = clean(cc)
+        let bccList = clean(bcc)
+        guard !toList.isEmpty || !ccList.isEmpty || !bccList.isEmpty else {
+            throw MailSenderError.emptyRecipient
+        }
 
         let tmp = FileManager.default.temporaryDirectory
         let bodyURL = tmp.appendingPathComponent("mailpilot_body_\(UUID().uuidString).txt")
@@ -55,9 +66,16 @@ enum MailSender {
             try? FileManager.default.removeItem(at: subjectURL)
         }
 
-        let recipientLines = addresses
-            .map { "make new to recipient at end of to recipients with properties {address:\"\(escape($0))\"}" }
-            .joined(separator: "\n        ")
+        func lines(_ addresses: [String], _ kind: String) -> String {
+            addresses
+                .map { "make new \(kind) recipient at end of \(kind) recipients with properties {address:\"\(escape($0))\"}" }
+                .joined(separator: "\n        ")
+        }
+
+        // sender 必须是「邮件」里已配置的邮箱地址，否则会报错；用 try 包住，失败就退回默认账号
+        let senderLine = from.trimmingCharacters(in: .whitespaces).isEmpty
+            ? ""
+            : "try\n            set sender to \"\(escape(from))\"\n        end try"
 
         let script = """
         set bodyFile to POSIX file "\(bodyURL.path)"
@@ -68,7 +86,10 @@ enum MailSender {
         tell application "Mail"
             set newMessage to make new outgoing message with properties {subject:theSubject, content:theBody, visible:true}
             tell newMessage
-                \(recipientLines)
+                \(senderLine)
+                \(lines(toList, "to"))
+                \(lines(ccList, "cc"))
+                \(lines(bccList, "bcc"))
             end tell
             activate
             \(sendNow ? "send newMessage" : "")
@@ -84,10 +105,14 @@ enum MailSender {
             let message = (errorInfo[NSAppleScript.errorMessage] as? String) ?? "脚本执行失败"
             let number = (errorInfo[NSAppleScript.errorNumber] as? Int) ?? 0
             if number == -1743 {
-                throw MailSenderError.script("未授权控制「邮件」。请到 系统设置 → 隐私与安全性 → 自动化 中勾选 MailPilot")
+                throw MailSenderError.script("未授权控制「邮件」。到 设置 → 权限管理 → 控制「邮件」App 点「申请权限」即可")
             }
             throw MailSenderError.script(message)
         }
+    }
+
+    private static func clean(_ list: [String]) -> [String] {
+        list.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     private static func escape(_ raw: String) -> String {

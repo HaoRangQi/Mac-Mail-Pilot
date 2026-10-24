@@ -30,7 +30,7 @@ final class NativeMailStore: MailStore {
             result.append(Account(
                 id: box.accountID,
                 name: accountDisplayName(box.accountID),
-                email: "",
+                email: accountEmail(box.accountID),
                 provider: "mail"
             ))
         }
