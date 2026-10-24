@@ -98,8 +98,7 @@ extension View {
         self.glassEffect(.regular, in: .rect(cornerRadius: radius))
     }
 
-    /// 滚动条默认隐藏，鼠标移入才显示。
-    /// macOS 没有「hover 才出 scroller」的原生开关，只能自己用 onHover 切 scrollIndicators。
+    /// 滚动条默认不显示，鼠标移入才出现。
     func hoverScrollIndicators() -> some View {
         modifier(HoverScrollIndicators())
     }
@@ -117,12 +116,19 @@ final class ScrollHoverState: ObservableObject {
     @Published var hovering = false
 }
 
+/// 滚动条默认不显示，鼠标移入才出现。
+///
+/// 两个关键点：
+/// 1. 用 `.never` 而不是 `.hidden` —— macOS 上 `.hidden` 会被系统偏好覆盖，`.never` 才是强制不画
+/// 2. 只能走这个 API：SwiftUI 在 macOS 26 用的是**自绘滚动容器**，视图层级里根本没有
+///    NSScrollView（实测探针的 superview 链只有 `_NSGraphicsView`），拿 AppKit 的
+///    `hasVerticalScroller` 调不到
 struct HoverScrollIndicators: ViewModifier {
     @StateObject private var state = ScrollHoverState()
 
     func body(content: Content) -> some View {
         content
-            .scrollIndicators(state.hovering ? .visible : .hidden)
+            .scrollIndicators(state.hovering ? .visible : .never)
             .onHover { state.hovering = $0 }
     }
 }

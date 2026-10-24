@@ -2,6 +2,13 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.24] - 2026-10-24
+
+### 修复
+
+- **滚动条隐藏不生效**：`.scrollIndicators(.hidden)` 在 macOS 上会被系统偏好覆盖，改用 **`.never`**（强制不画），悬停时切 `.visible`
+- 顺带查明：SwiftUI 在 macOS 26 用的是**自绘滚动容器**，视图层级里没有 `NSScrollView`（实测探针 superview 链只有 `_NSGraphicsView`），所以想用 AppKit 的 `hasVerticalScroller` 控制滚动条这条路走不通，只能走 `scrollIndicators` API
+
 ## [0.2.23] - 2026-10-24
 
 ### 变更
