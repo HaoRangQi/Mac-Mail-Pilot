@@ -36,7 +36,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 400)
+                .frame(width: 470)
 
                 Spacer()
 
@@ -52,6 +52,8 @@ struct SettingsView: View {
             Divider().opacity(0.6)
 
             switch model.settingsTab {
+            case .appearance:
+                AppearanceSettingsView()
             case .permissions:
                 PermissionView()
             case .providers:
@@ -107,11 +109,11 @@ struct SettingsView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("服务商")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(ai.providers.filter(\.enabled).count) 启用")
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 14)
@@ -136,7 +138,7 @@ struct SettingsView: View {
                     Image(systemName: "plus")
                     Text("添加服务商")
                 }
-                .font(.system(size: 12))
+                .font(.app(12))
                 .frame(maxWidth: .infinity)
                 .frame(height: 30)
                 .contentShape(Rectangle())
@@ -154,13 +156,13 @@ struct SettingsView: View {
         return HStack(spacing: 7) {
             ProviderAvatar(provider: provider, size: 20)
             Text(provider.name)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .foregroundStyle(provider.enabled ? Color.primary : Color.secondary)
                 .lineLimit(1)
             Spacer(minLength: 2)
             if active {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(.app(9, weight: .semibold))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -214,10 +216,10 @@ struct SettingsView: View {
         } else {
             VStack(spacing: 8) {
                 Text("还没有服务商")
-                    .font(.system(size: 13))
+                    .font(.app(13))
                     .foregroundStyle(.secondary)
                 Text("在左下角添加一个")
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -230,11 +232,11 @@ struct SettingsView: View {
 
             TextField("服务商名称", text: stringBinding(provider, \.name))
                 .textFieldStyle(.plain)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.app(16, weight: .semibold))
                 .frame(maxWidth: 260)
 
             Text(provider.kind.label)
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 7)
                 .frame(height: 19)
@@ -246,7 +248,7 @@ struct SettingsView: View {
                 form.pendingDeleteID = provider.id
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 11.5, weight: .medium))
+                    .font(.app(11.5, weight: .medium))
                     .foregroundStyle(Theme.brick.opacity(0.9))
                     .frame(width: 28, height: 28)
                     .background(Theme.brick.opacity(0.10), in: Circle())
@@ -306,15 +308,15 @@ struct SettingsView: View {
     private func trustSection(_ provider: AIProvider) -> some View {
         HStack(alignment: .top, spacing: 9) {
             Image(systemName: trustIcon(provider))
-                .font(.system(size: 13))
+                .font(.app(13))
                 .foregroundStyle(trustColor(provider))
                 .frame(width: 18)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(trustTitle(provider))
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                 Text(trustDetail(provider))
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -363,10 +365,10 @@ struct SettingsView: View {
 
     private func keySection(_ provider: AIProvider) -> some View {        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                Text("API 密钥").font(.system(size: 12, weight: .medium))
+                Text("API 密钥").font(.app(12, weight: .medium))
                 if provider.allKeys.count > 1 {
                     Text("+\(provider.allKeys.count - 1)")
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -378,12 +380,12 @@ struct SettingsView: View {
                 } label: {
                     HStack {
                         Text(keySummary(provider))
-                            .font(.system(size: 12.5, design: .monospaced))
+                            .font(.app(12.5, design: .monospaced))
                             .foregroundStyle(provider.hasKey || provider.kind.isLocal ? Color.primary : Color.secondary)
                             .lineLimit(1)
                         Spacer()
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9))
+                            .font(.app(9))
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.horizontal, 10)
@@ -400,7 +402,7 @@ struct SettingsView: View {
                     form.activeSheet = .keys
                 } label: {
                     Image(systemName: "key")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
                         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -412,7 +414,7 @@ struct SettingsView: View {
                     form.activeSheet = .test
                 } label: {
                     Text("检测")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .padding(.horizontal, 14)
                         .frame(height: 30)
                 }
@@ -432,10 +434,10 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 8) {
                 Text("API 地址")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                 if let status = form.status {
                     Text(status)
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(status.hasPrefix("失败") ? Theme.brick : Color.secondary)
                         .lineLimit(1)
                 }
@@ -444,7 +446,7 @@ struct SettingsView: View {
             HStack(spacing: 8) {
                 TextField("https://api.example.com（/v1 可省略）", text: stringBinding(provider, \.baseURL))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5, design: .monospaced))
+                    .font(.app(12.5, design: .monospaced))
                     .padding(.horizontal, 10)
                     .frame(height: 30)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -454,7 +456,7 @@ struct SettingsView: View {
                     ai.update(id: provider.id) { $0.baseURL = provider.kind.defaultBase }
                 } label: {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
                         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -464,18 +466,18 @@ struct SettingsView: View {
             }
 
             Text("实际请求：\(AIService.previewRequestURL(base: provider.baseURL, kind: provider.kind))")
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.app(10.5, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
                 .textSelection(.enabled)
 
             HStack(spacing: 5) {
                 Image(systemName: provider.kind.isLocal ? "lock.shield.fill" : "lock.shield")
-                    .font(.system(size: 10))
+                    .font(.app(10))
                 Text(provider.kind.isLocal
                      ? "本地模型，邮件内容不出本机"
                      : "推荐使用本地模型：邮件内容不会离开这台电脑")
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
             }
             .foregroundStyle(provider.kind.isLocal ? Theme.moss : Color.secondary)
         }
@@ -485,9 +487,9 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 Text("模型")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                 Text("\(provider.models.count)")
-                    .font(.system(size: 10))
+                    .font(.app(10))
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Button {
@@ -497,7 +499,7 @@ struct SettingsView: View {
                         Image(systemName: "plus")
                         Text("添加")
                     }
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -509,7 +511,7 @@ struct SettingsView: View {
                         Image(systemName: "checklist")
                         Text("选择模型")
                     }
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -521,7 +523,7 @@ struct SettingsView: View {
                         Image(systemName: "arrow.triangle.2.circlepath")
                         Text("同步模型")
                     }
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -531,7 +533,7 @@ struct SettingsView: View {
             VStack(spacing: 0) {
                 if provider.models.isEmpty {
                     Text("还没有选中模型，点「同步模型」拉取后挑选")
-                        .font(.system(size: 11.5))
+                        .font(.app(11.5))
                         .foregroundStyle(.tertiary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 10)
@@ -553,10 +555,10 @@ struct SettingsView: View {
         let selected = provider.selectedModel == model
         return HStack(spacing: 8) {
             Image(systemName: selected ? "largecircle.fill.circle" : "circle")
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.6))
             Text(provider.displayName(for: model))
-                .font(.system(size: 12))
+                .font(.app(12))
                 .lineLimit(1)
             Spacer()
 
@@ -565,7 +567,7 @@ struct SettingsView: View {
                     ai.setModelTrust(provider.id, model: model, nextTrustOverride(provider, model))
                 } label: {
                     Image(systemName: trustBadgeIcon(provider, model))
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(trustBadgeColor(provider, model))
                 }
                 .buttonStyle(.plain)
@@ -579,7 +581,7 @@ struct SettingsView: View {
                 }
             } label: {
                 Image(systemName: "minus.circle")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.tertiary)
             }
             .buttonStyle(.plain)
@@ -596,7 +598,7 @@ struct SettingsView: View {
             Text(ai.activeProvider?.id == provider.id
                  ? "当前使用：\(provider.name) · \(provider.selectedModel)"
                  : "未在使用（需要启用、填密钥、选模型）")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
             Spacer()
         }

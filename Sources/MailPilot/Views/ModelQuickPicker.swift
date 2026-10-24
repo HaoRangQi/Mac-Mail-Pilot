@@ -24,7 +24,7 @@ struct ModelQuickPicker: View {
                     LazyVStack(alignment: .leading, spacing: 2) {
                         ForEach(groups, id: \.provider.id) { group in
                             Text(group.provider.name)
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(.app(10.5, weight: .medium))
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
                                 .padding(.horizontal, 14)
@@ -65,17 +65,17 @@ struct ModelQuickPicker: View {
     private var searchBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(.secondary)
             TextField("搜索模型…", text: $form.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
             if !form.query.isEmpty {
                 Button {
                     form.query = ""
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -94,21 +94,21 @@ struct ModelQuickPicker: View {
         } label: {
             HStack(spacing: 8) {
                 Text(provider.displayName(for: modelID))
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
 
                 if !provider.kind.isLocal, !provider.isTrusted(modelID) {
                     Image(systemName: "exclamationmark.shield.fill")
-                        .font(.system(size: 9))
+                        .font(.app(9))
                         .foregroundStyle(Theme.gold)
                         .help("不可信模型：发送前会自动脱敏")
                 }
 
                 if selected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.app(10, weight: .semibold))
                         .foregroundStyle(Theme.moss)
                 }
             }
@@ -128,14 +128,14 @@ struct ModelQuickPicker: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "cpu")
-                .font(.system(size: 22, weight: .light))
+                .font(.app(22, weight: .light))
                 .foregroundStyle(.tertiary)
             Text(form.query.isEmpty ? "没有可用的模型" : "没有匹配的模型")
-                .font(.system(size: 12))
+                .font(.app(12))
                 .foregroundStyle(.secondary)
             if form.query.isEmpty {
                 Text("先在「模型服务」里配置服务商与 API Key")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.tertiary)
                 Button("打开模型服务") {
                     dismiss()
@@ -153,9 +153,9 @@ struct ModelQuickPicker: View {
     private var footer: some View {
         HStack(spacing: 6) {
             Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 11))
+                .font(.app(11))
             Text("配置模型服务")
-                .font(.system(size: 12))
+                .font(.app(12))
             Spacer()
         }
         .foregroundStyle(.secondary)

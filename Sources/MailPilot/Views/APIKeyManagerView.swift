@@ -45,7 +45,7 @@ struct APIKeyManagerView: View {
                                 Image(systemName: "plus")
                                 Text("添加 API 密钥")
                             }
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .frame(maxWidth: .infinity)
                             .frame(height: 32)
                         }
@@ -53,18 +53,18 @@ struct APIKeyManagerView: View {
                         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                     } else {
                         Text("服务商不存在")
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .foregroundStyle(.secondary)
                     }
 
                     if let hint = form.hint {
                         Text(hint)
-                            .font(.system(size: 10.5))
+                            .font(.app(10.5))
                             .foregroundStyle(.secondary)
                     }
 
                     Text("多条密钥会按顺序尝试，遇到 401/403/429 自动换下一条。")
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.tertiary)
                 }
                 .padding(20)
@@ -91,9 +91,9 @@ struct APIKeyManagerView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 3) {
                 Text("API 密钥管理")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.app(14, weight: .semibold))
                 Text("管理当前服务商的多个 API Key")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
             }
             Spacer()
@@ -101,7 +101,7 @@ struct APIKeyManagerView: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06), in: Circle())
@@ -119,7 +119,7 @@ struct APIKeyManagerView: View {
         VStack(spacing: 0) {
             if provider.allKeys.isEmpty {
                 Text("还没有密钥")
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 14)
@@ -142,14 +142,14 @@ struct APIKeyManagerView: View {
             HStack(spacing: 8) {
                 TextField("标签", text: $form.editLabel)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .padding(.horizontal, 8)
                     .frame(width: 96, height: 28)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
 
                 TextField("API 密钥", text: $form.editValue)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .padding(.horizontal, 8)
                     .frame(height: 28)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 6))
@@ -165,11 +165,11 @@ struct APIKeyManagerView: View {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(form.revealed.contains(key.id) ? key.value : key.masked)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.app(12, design: .monospaced))
                         .lineLimit(1)
                     if !key.label.isEmpty {
                         Text(key.label)
-                            .font(.system(size: 10))
+                            .font(.app(10))
                             .foregroundStyle(.tertiary)
                     }
                 }
@@ -208,7 +208,7 @@ struct APIKeyManagerView: View {
     private func iconButton(_ system: String, color: Color = .secondary, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: system)
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(color)
                 .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
@@ -222,7 +222,7 @@ struct APIKeyManagerView: View {
         HStack(spacing: 8) {
             TextField("标签", text: $form.newLabel)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(.app(12))
                 .padding(.horizontal, 9)
                 .frame(width: 96, height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -230,7 +230,7 @@ struct APIKeyManagerView: View {
 
             TextField("输入 API 密钥", text: $form.newValue)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.app(12, design: .monospaced))
                 .padding(.horizontal, 9)
                 .frame(height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))

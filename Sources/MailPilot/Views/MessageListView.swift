@@ -24,10 +24,10 @@ struct MessageListView: View {
     private var header: some View {
         HStack {
             Text(model.query.isEmpty ? model.selectionTitle : "搜索结果")
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(.app(12.5, weight: .semibold))
             Spacer()
             Text("\(model.messages.count) 封")
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 16)
@@ -50,31 +50,31 @@ struct MessageListView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(message.displaySender)
-                            .font(.system(size: 12.5, weight: message.unread ? .semibold : .regular))
+                            .font(.app(12.5, weight: message.unread ? .semibold : .regular))
                             .lineLimit(1)
                         if message.flagged {
                             Image(systemName: "flag.fill")
-                                .font(.system(size: 9))
+                                .font(.app(9))
                                 .foregroundStyle(.orange)
                         }
                         Spacer(minLength: 4)
                         Text(Self.dateText(message.date))
-                            .font(.system(size: 10.5))
+                            .font(.app(10.5))
                             .foregroundStyle(.tertiary)
                     }
                     Text(message.subject)
-                        .font(.system(size: 12.5, weight: message.unread ? .medium : .regular))
+                        .font(.app(12.5, weight: message.unread ? .medium : .regular))
                         .foregroundStyle(message.unread ? .primary : .secondary)
                         .lineLimit(1)
                     Text(message.preview)
-                        .font(.system(size: 11.5))
+                        .font(.app(11.5))
                         .foregroundStyle(.tertiary)
-                        .lineLimit(2)
+                        .lineLimit(UIState.previewLines)
                         .padding(.top, 1)
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 9)
+            .padding(.vertical, UIState.rowPadding)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(active ? Theme.accent.opacity(0.12) : Color.clear)

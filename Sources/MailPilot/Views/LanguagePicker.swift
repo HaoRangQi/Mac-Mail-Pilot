@@ -73,9 +73,9 @@ struct LanguagePickerButton: View {
         } label: {
             HStack(spacing: 5) {
                 Text(selection.isEmpty ? "选择语言" : selection)
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8))
+                    .font(.app(8))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 10)
@@ -93,15 +93,15 @@ struct LanguagePickerButton: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                 TextField("搜索语言", text: $ui.query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                 if !ui.query.isEmpty {
                     Button { ui.query = "" } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.plain)
@@ -120,7 +120,7 @@ struct LanguagePickerButton: View {
                 LazyVStack(spacing: 0) {
                     if filtered.isEmpty {
                         Text("没有匹配的语言")
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .foregroundStyle(.tertiary)
                             .padding(.vertical, 24)
                     }
@@ -143,15 +143,15 @@ struct LanguagePickerButton: View {
         } label: {
             HStack(spacing: 8) {
                 Text(language.zh)
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                     .foregroundStyle(selected ? Theme.accent : Color.primary)
                 Text(language.en)
-                    .font(.system(size: 10))
+                    .font(.app(10))
                     .foregroundStyle(.tertiary)
                 Spacer()
                 if selected {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.app(10, weight: .semibold))
                         .foregroundStyle(Theme.accent)
                 }
             }

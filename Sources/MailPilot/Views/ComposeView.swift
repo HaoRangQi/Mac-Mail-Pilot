@@ -41,12 +41,12 @@ struct ComposeView: View {
             if let scriptError = form.scriptError {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .padding(.top, 1)
                     Text(scriptError)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(Theme.brick)
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
@@ -69,10 +69,10 @@ struct ComposeView: View {
     private var header: some View {
         HStack {
             Text("写邮件")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
             Spacer()
             Text("由「邮件」App 投递")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 20)
@@ -83,7 +83,7 @@ struct ComposeView: View {
         HStack(spacing: 10) {
             Toggle("直接发送", isOn: $form.sendNow)
                 .toggleStyle(.checkbox)
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(.secondary)
                 .help("勾选后立即投递；不勾选只打开「邮件」的撰写窗口，由你手动点发送")
 
@@ -110,7 +110,7 @@ struct ComposeView: View {
 
             if model.accounts.isEmpty {
                 Text("没有可用账号")
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.tertiary)
             } else {
                 Picker("", selection: $form.fromAccountID) {
@@ -120,7 +120,7 @@ struct ComposeView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .frame(maxWidth: 420, alignment: .leading)
             }
 
@@ -135,7 +135,7 @@ struct ComposeView: View {
             label(title)
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
         }
         .padding(.horizontal, 20)
         .frame(height: 38)
@@ -143,7 +143,7 @@ struct ComposeView: View {
 
     private var bodyEditor: some View {
         TextEditor(text: $form.bodyText)
-            .font(.system(size: 13))
+            .font(.app(13))
             .scrollContentBackground(.hidden)
             .frame(height: 230)
             .padding(.horizontal, 14)
@@ -151,7 +151,7 @@ struct ComposeView: View {
             .overlay(alignment: .topLeading) {
                 if form.bodyText.isEmpty {
                     Text("正文")
-                        .font(.system(size: 13))
+                        .font(.app(13))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 19)
                         .padding(.vertical, 16)
@@ -166,7 +166,7 @@ struct ComposeView: View {
 
     private func label(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 12))
+            .font(.app(12))
             .foregroundStyle(.secondary)
             .frame(width: 44, alignment: .leading)
     }

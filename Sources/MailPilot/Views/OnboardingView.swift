@@ -28,16 +28,16 @@ struct OnboardingView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "lock.shield")
-                .font(.system(size: 18, weight: .regular))
+                .font(.app(18, weight: .regular))
                 .foregroundStyle(Theme.aiGradient)
                 .frame(width: 40, height: 40)
                 .background(Theme.aiGradient.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("让 MailPilot 读取你的邮件")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.app(15, weight: .semibold))
                 Text("只读取「邮件」App 已经同步到本机的数据，不上传、不需要登录。")
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -55,9 +55,9 @@ struct OnboardingView: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "info.circle")
-                    .font(.system(size: 10))
+                    .font(.app(10))
                 Text("如果仍然提示无权限，请退出 MailPilot 再重新打开——权限只对新启动的进程生效。")
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(.tertiary)
@@ -65,7 +65,7 @@ struct OnboardingView: View {
 
             if let hint = ui.hint {
                 Text(hint)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(ui.failed ? Theme.brick : Color.secondary)
             }
         }
@@ -76,12 +76,12 @@ struct OnboardingView: View {
     private func step(_ index: Int, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text("\(index)")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.app(10, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 18, height: 18)
                 .background(Color.primary.opacity(0.07), in: Circle())
             Text(text)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
@@ -93,7 +93,7 @@ struct OnboardingView: View {
                 model.useDemoData()
             }
             .buttonStyle(.plain)
-            .font(.system(size: 11.5))
+            .font(.app(11.5))
             .foregroundStyle(.secondary)
 
             Spacer()

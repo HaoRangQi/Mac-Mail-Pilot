@@ -42,6 +42,7 @@ enum Appearance: String, CaseIterable, Identifiable {
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
+    case appearance
     case permissions
     case providers
     case privacy
@@ -52,6 +53,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .appearance: return "外观"
         case .permissions: return "权限管理"
         case .providers: return "模型服务"
         case .privacy: return "隐私与数据"
@@ -156,6 +158,9 @@ final class AppModel: ObservableObject {    // 数据
 
     let ai = AISettingsStore()
     let prefs = AIPreferencesStore()
+    /// 界面外观设置。改它 → store 发通知 → 这里转发 → 观察 model 的视图全部重算
+    let ui = UISettingsStore()
+    private var uiObserver: AnyCancellable?
     private(set) var store: MailStore = DemoStore()
     private var searchTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -167,6 +172,12 @@ final class AppModel: ObservableObject {    // 数据
         appearance = Appearance(rawValue: raw) ?? .system
         collapsedSections = Set(UserDefaults.standard.stringArray(forKey: "mailpilot.sidebar.collapsed") ?? [])
         loadAskHistory()
+
+        // UIState 是静态快照，视图不会自己发现它变了。
+        // 把 store 的变更转发成 AppModel 的变更，主界面才能立刻跟着变。
+        uiObserver = ui.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
 
         if let native = NativeMailStore() {
             store = native

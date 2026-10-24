@@ -64,7 +64,7 @@ struct ReaderView: View {
                     DisclosureGroup("查看实际发送的内容") {
                         ScrollView {
                             Text(request.outboundPreview)
-                                .font(.system(size: 10.5, design: .monospaced))
+                                .font(.app(10.5, design: .monospaced))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .textSelection(.enabled)
                         }
@@ -72,7 +72,7 @@ struct ReaderView: View {
                         .padding(8)
                         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
                     }
-                    .font(.system(size: 11))
+                    .font(.app(11))
                 }
             }
         }
@@ -81,10 +81,10 @@ struct ReaderView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "envelope.open")
-                .font(.system(size: 26, weight: .light))
+                .font(.app(26, weight: .light))
                 .foregroundStyle(.tertiary)
             Text("选择一封邮件")
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .foregroundStyle(.secondary)
         }
     }
@@ -94,20 +94,20 @@ struct ReaderView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(message.subject)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.app(19, weight: .semibold))
                         .lineSpacing(2)
                         .textSelection(.enabled)
                         .padding(.bottom, 10)
 
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(message.displaySender)
-                            .font(.system(size: 13.5, weight: .semibold))
+                            .font(.app(13.5, weight: .semibold))
                             .foregroundStyle(.primary)
                             .textSelection(.enabled)
 
                         if !message.senderEmail.isEmpty {
                             Text(message.senderEmail)
-                                .font(.system(size: 12))
+                                .font(.app(12))
                                 .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
 
@@ -116,7 +116,7 @@ struct ReaderView: View {
                                 model.showToast("已复制邮箱地址")
                             } label: {
                                 Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 9.5))
+                                    .font(.app(9.5))
                                     .foregroundStyle(.tertiary)
                             }
                             .buttonStyle(.plain)
@@ -126,7 +126,7 @@ struct ReaderView: View {
                         Spacer(minLength: 10)
 
                         Text(dateText(message.date))
-                            .font(.system(size: 11.5))
+                            .font(.app(11.5))
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
@@ -166,12 +166,12 @@ struct ReaderView: View {
 
                     if message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Text("（这封邮件没有正文）")
-                            .font(.system(size: 12.5))
+                            .font(.app(12.5))
                             .foregroundStyle(.tertiary)
                     } else {
                         Text(message.body)
-                            .font(.system(size: 13.5))
-                            .lineSpacing(6)
+                            .font(.app(UIState.readerFontSize))
+                            .lineSpacing(UIState.readerLineSpacing)
                             .textSelection(.enabled)
                             .frame(maxWidth: 760, alignment: .leading)
                     }
@@ -181,12 +181,12 @@ struct ReaderView: View {
                             ForEach(message.attachments) { att in
                                 HStack(spacing: 5) {
                                     Image(systemName: "paperclip")
-                                        .font(.system(size: 10))
+                                        .font(.app(10))
                                     Text(att.filename)
-                                        .font(.system(size: 11.5))
+                                        .font(.app(11.5))
                                     if !att.sizeText.isEmpty {
                                         Text(att.sizeText)
-                                            .font(.system(size: 10.5))
+                                            .font(.app(10.5))
                                             .foregroundStyle(.tertiary)
                                     }
                                 }
@@ -213,14 +213,14 @@ struct ReaderView: View {
             if prefs.prefs.quickRepliesEnabled {
                 HStack(spacing: 6) {
                     Text("快速回复")
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.tertiary)
                     ForEach(prefs.prefs.quickReplies, id: \.self) { text in
                         Button {
                             model.draftReply(instruction: text)
                         } label: {
                             Text(text)
-                                .font(.system(size: 11.5))
+                                .font(.app(11.5))
                                 .padding(.horizontal, 9)
                                 .frame(height: 24)
                                 .background(Color.primary.opacity(0.05), in: Capsule())
@@ -250,7 +250,7 @@ struct ReaderView: View {
                         model.requestDelete(message)
                     } label: {
                         Image(systemName: "trash")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.app(11, weight: .medium))
                             .foregroundStyle(Theme.brick)
                             .frame(width: 28, height: 28)
                             .glassEffect(.regular.interactive(), in: .circle)
@@ -265,9 +265,9 @@ struct ReaderView: View {
                     if !model.aiOutputTrusted {
                         HStack(spacing: 4) {
                             Image(systemName: "exclamationmark.shield.fill")
-                                .font(.system(size: 9))
+                                .font(.app(9))
                             Text("由不可信模型生成 · 邮件内容已发送到该服务商")
-                                .font(.system(size: 10.5))
+                                .font(.app(10.5))
                         }
                         .foregroundStyle(Theme.gold)
                     }
@@ -279,13 +279,13 @@ struct ReaderView: View {
                                 ForEach(model.aiRedactions, id: \.placeholder) { mapping in
                                     HStack(spacing: 6) {
                                         Text(mapping.placeholder)
-                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .font(.app(10.5, design: .monospaced))
                                             .foregroundStyle(Theme.gold)
                                         Image(systemName: "arrow.left")
-                                            .font(.system(size: 8))
+                                            .font(.app(8))
                                             .foregroundStyle(.tertiary)
                                         Text(mapping.original)
-                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .font(.app(10.5, design: .monospaced))
                                             .textSelection(.enabled)
                                     }
                                 }
@@ -294,14 +294,14 @@ struct ReaderView: View {
                             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
                         } label: {
                             Text("已脱敏 \(model.aiRedactions.count) 处：\(Redactor.summary(model.aiRedactions))")
-                                .font(.system(size: 10.5))
+                                .font(.app(10.5))
                         }
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(Theme.gold)
                     }
                     if model.aiEditing {
                         TextEditor(text: $model.aiDraftText)
-                            .font(.system(size: 12.5))
+                            .font(.app(12.5))
                             .scrollContentBackground(.hidden)
                             .frame(height: 150)
                             .padding(9)
@@ -309,7 +309,7 @@ struct ReaderView: View {
                     } else {
                         ScrollView {
                             Text(output)
-                                .font(.system(size: 12.5))
+                                .font(.app(12.5))
                                 .lineSpacing(4)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -366,8 +366,8 @@ struct ReaderView: View {
     private func aiButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 10.5))
-                Text(title).font(.system(size: 12))
+                Image(systemName: icon).font(.app(10.5))
+                Text(title).font(.app(12))
             }
             .padding(.horizontal, 11)
             .frame(height: 27)
@@ -384,8 +384,8 @@ struct ReaderView: View {
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 10.5))
-                Text(title).font(.system(size: 12))
+                Image(systemName: icon).font(.app(10.5))
+                Text(title).font(.app(12))
             }
             .foregroundStyle(tint)
             .padding(.horizontal, 11)
@@ -437,12 +437,12 @@ struct ReaderView: View {
         if !addresses.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(label)
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .foregroundStyle(.tertiary)
                     .frame(width: 34, alignment: .leading)
 
                 Text(addresses.joined(separator: "、"))
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -451,7 +451,7 @@ struct ReaderView: View {
 
                 if addresses.count > 1 {
                     Text("共 \(addresses.count) 人")
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.tertiary)
                 }
 
@@ -460,7 +460,7 @@ struct ReaderView: View {
                     model.showToast("已复制\(label)")
                 } label: {
                     Image(systemName: "doc.on.doc")
-                        .font(.system(size: 9.5))
+                        .font(.app(9.5))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)

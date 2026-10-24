@@ -65,18 +65,18 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(.app(8, weight: .semibold))
                     .foregroundStyle(.tertiary)
                     .frame(width: 9, alignment: .center)
                 Text(title)
-                    .font(.system(size: 10.5, weight: .medium))
+                    .font(.app(10.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
                 if badge > 0 {
                     Text("\(badge)")
-                        .font(.system(size: 9.5))
+                        .font(.app(9.5))
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -121,17 +121,17 @@ struct SidebarView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .frame(width: 16)
                     .foregroundStyle(active ? Color.white : Color.secondary)
                 Text(title)
-                    .font(.system(size: 12.5, weight: active ? .medium : .regular))
+                    .font(.app(12.5, weight: active ? .medium : .regular))
                     .foregroundStyle(active ? Color.white : Color.primary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if badge > 0 {
                     Text("\(badge)")
-                        .font(.system(size: 10.5, weight: .medium))
+                        .font(.app(10.5, weight: .medium))
                         .foregroundStyle(active ? Color.white.opacity(0.9) : Color.secondary)
                         .padding(.horizontal, 5)
                         .frame(minWidth: 17, minHeight: 15)

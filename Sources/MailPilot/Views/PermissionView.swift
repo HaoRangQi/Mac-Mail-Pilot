@@ -44,7 +44,7 @@ struct PermissionView: View {
     private var statusCard: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: authorized ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-                .font(.system(size: 22))
+                .font(.app(22))
                 .foregroundStyle(authorized ? Theme.moss : Theme.gold)
                 .frame(width: 44, height: 44)
                 .background(
@@ -54,9 +54,9 @@ struct PermissionView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(authorized ? "已获得完全磁盘访问权限" : "尚未获得完全磁盘访问权限")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.app(13, weight: .semibold))
                 Text(statusDetail)
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -87,7 +87,7 @@ struct PermissionView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: automationIcon)
-                    .font(.system(size: 22))
+                    .font(.app(22))
                     .foregroundStyle(automationColor)
                     .frame(width: 44, height: 44)
                     .background(
@@ -97,9 +97,9 @@ struct PermissionView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("控制「邮件」App")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.app(13, weight: .semibold))
                     Text(automationDetail)
-                        .font(.system(size: 11.5))
+                        .font(.app(11.5))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -122,7 +122,7 @@ struct PermissionView: View {
 
             if let hint = form.automationHint {
                 Text(hint)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -193,7 +193,7 @@ struct PermissionView: View {
     private var explainCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("MailPilot 会读什么")
-                .font(.system(size: 12, weight: .medium))
+                .font(.app(12, weight: .medium))
 
             bullet("checkmark", "读取「邮件」App 已同步到本机的 .emlx 文件（只读）", color: .green)
             bullet("checkmark", "所有数据都留在本机，不上传、不需要登录账号", color: .green)
@@ -208,12 +208,12 @@ struct PermissionView: View {
     private func bullet(_ icon: String, _ text: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.app(9, weight: .bold))
                 .foregroundStyle(color)
                 .frame(width: 14)
                 .padding(.top, 2)
             Text(text)
-                .font(.system(size: 11.5))
+                .font(.app(11.5))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -258,11 +258,11 @@ struct PermissionView: View {
         VStack(alignment: .leading, spacing: 4) {
             if let hint = form.hint {
                 Text(hint)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(form.failed ? Theme.brick : Color.secondary)
             }
             Text("修改权限后如果仍检测不到，请退出 MailPilot 再重新打开——权限只对新启动的进程生效。")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
         }
     }

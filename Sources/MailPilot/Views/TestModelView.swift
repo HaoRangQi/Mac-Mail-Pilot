@@ -63,13 +63,13 @@ struct TestModelView: View {
     private var header: some View {
         HStack(alignment: .top) {
             Text("请选择要检测的模型")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
             Spacer()
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06), in: Circle())
@@ -85,7 +85,7 @@ struct TestModelView: View {
 
     private var modelPicker: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("选择模型").font(.system(size: 12, weight: .medium))
+            Text("选择模型").font(.app(12, weight: .medium))
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     if let provider {
@@ -103,7 +103,7 @@ struct TestModelView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text("服务商不存在")
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -120,10 +120,10 @@ struct TestModelView: View {
                         if form.busy {
                             ProgressView().controlSize(.mini)
                         } else {
-                            Image(systemName: "play.fill").font(.system(size: 8))
+                            Image(systemName: "play.fill").font(.app(8))
                         }
                         Text("检测")
-                            .font(.system(size: 11.5, weight: .medium))
+                            .font(.app(11.5, weight: .medium))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 11)
@@ -145,10 +145,10 @@ struct TestModelView: View {
 
     private var keyRow: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("API 密钥").font(.system(size: 12, weight: .medium))
+            Text("API 密钥").font(.app(12, weight: .medium))
             HStack {
                 Text(provider?.primaryKey?.masked ?? (provider?.kind.isLocal == true ? "本地模型无需密钥" : "未配置密钥"))
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .foregroundStyle(.secondary)
                 Spacer()
             }
@@ -161,16 +161,16 @@ struct TestModelView: View {
 
     private var promptRow: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("检测对话").font(.system(size: 12, weight: .medium))
+            Text("检测对话").font(.app(12, weight: .medium))
             TextField("输入用于检测的提问", text: $form.prompt)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .padding(.horizontal, 10)
                 .frame(height: 36)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
             Text("默认问模型身份与数据截止日期，可自行改写。")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
         }
     }
@@ -178,11 +178,11 @@ struct TestModelView: View {
     private var resultList: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("检测结果").font(.system(size: 12, weight: .medium))
+                Text("检测结果").font(.app(12, weight: .medium))
                 Spacer()
                 if form.busy {
                     Text(form.progress)
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.tertiary)
                     ProgressView().controlSize(.small)
                 }
@@ -193,14 +193,14 @@ struct TestModelView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             Image(systemName: item.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .font(.system(size: 10.5))
+                                .font(.app(10.5))
                                 .foregroundStyle(item.ok ? Theme.moss : Theme.brick)
                             Text(item.model)
-                                .font(.system(size: 11.5, design: .monospaced))
+                                .font(.app(11.5, design: .monospaced))
                                 .lineLimit(1)
                         }
                         Text(item.text)
-                            .font(.system(size: 12))
+                            .font(.app(12))
                             .foregroundStyle(item.ok ? Color.primary : Color.secondary)
                             .lineLimit(6)
                             .textSelection(.enabled)

@@ -42,7 +42,7 @@ struct AddModelView: View {
 
                     if let error = form.error {
                         Text(error)
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .foregroundStyle(.red)
                     }
                 }
@@ -62,11 +62,11 @@ struct AddModelView: View {
     private var header: some View {
         HStack {
             Text("添加模型")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
             Spacer()
             Button { onClose() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06), in: Circle())
@@ -80,7 +80,7 @@ struct AddModelView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Text("模型 ID 由服务商定义，可从其文档或 /models 接口获取")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
             Spacer()
@@ -101,14 +101,14 @@ struct AddModelView: View {
     private func field(_ title: String, required: Bool, placeholder: String, text: Binding<String>, mono: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 2) {
-                Text(title).font(.system(size: 12, weight: .medium))
+                Text(title).font(.app(12, weight: .medium))
                 if required {
-                    Text("*").font(.system(size: 12)).foregroundStyle(.red)
+                    Text("*").font(.app(12)).foregroundStyle(.red)
                 }
             }
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5, design: mono ? .monospaced : .default))
+                .font(.app(12.5, design: mono ? .monospaced : .default))
                 .padding(.horizontal, 10)
                 .frame(height: 34)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
@@ -124,10 +124,10 @@ struct AddModelView: View {
                 withAnimation(.easeInOut(duration: 0.15)) { form.showAdvanced.toggle() }
             } label: {
                 HStack {
-                    Text("更多设置").font(.system(size: 12, weight: .medium))
+                    Text("更多设置").font(.app(12, weight: .medium))
                     Spacer()
                     Image(systemName: form.showAdvanced ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
@@ -147,14 +147,14 @@ struct AddModelView: View {
 
     private func tokenField(_ title: String, text: Binding<String>, presets: [(String, Int)]) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.system(size: 11.5, weight: .medium))
+            Text(title).font(.app(11.5, weight: .medium))
             HStack(spacing: 6) {
                 ForEach(presets, id: \.0) { preset in
                     Button {
                         text.wrappedValue = String(preset.1)
                     } label: {
                         Text(preset.0)
-                            .font(.system(size: 10.5))
+                            .font(.app(10.5))
                             .padding(.horizontal, 8)
                             .frame(height: 22)
                             .background(Color.primary.opacity(0.05), in: Capsule())
@@ -165,7 +165,7 @@ struct AddModelView: View {
             }
             TextField("例如 128000", text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.app(12, design: .monospaced))
                 .padding(.horizontal, 10)
                 .frame(height: 30)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))

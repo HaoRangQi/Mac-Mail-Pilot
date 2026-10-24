@@ -42,16 +42,16 @@ struct AIEditorSheet: View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(title).font(.system(size: 14, weight: .semibold))
+                    Text(title).font(.app(14, weight: .semibold))
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.app(11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 26, height: 26)
                         .background(Color.primary.opacity(0.06), in: Circle())
@@ -65,14 +65,14 @@ struct AIEditorSheet: View {
             Divider().opacity(0.5)
 
             TextEditor(text: $form.text)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .scrollContentBackground(.hidden)
                 .padding(12)
                 .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
                 .overlay(alignment: .topLeading) {
                     if form.text.isEmpty {
                         Text(placeholder)
-                            .font(.system(size: 12.5))
+                            .font(.app(12.5))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 17)
                             .padding(.vertical, 20)
@@ -83,7 +83,7 @@ struct AIEditorSheet: View {
 
             if let hint = form.hint {
                 Text(hint)
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 20)
                     .padding(.bottom, 8)
@@ -106,8 +106,8 @@ struct AIEditorSheet: View {
                     } label: {
                         HStack(spacing: 5) {
                             if form.busy { ProgressView().controlSize(.mini) }
-                            else { Image(systemName: "sparkles").font(.system(size: 10)) }
-                            Text(generateHint).font(.system(size: 12))
+                            else { Image(systemName: "sparkles").font(.app(10)) }
+                            Text(generateHint).font(.app(12))
                         }
                     }
                     .disabled(form.busy)
@@ -292,11 +292,11 @@ struct AIFeaturesView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .frame(width: 18)
                     Text("恢复默认四问")
-                        .font(.system(size: 12.5))
+                        .font(.app(12.5))
                     Spacer()
                 }
                 .padding(.vertical, 9)
@@ -320,7 +320,7 @@ struct AIFeaturesView: View {
             divider
             HStack {
                 Label("目标语言", systemImage: "globe")
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                 Spacer()
                 LanguagePickerButton(selection: Binding(
                     get: { prefs.prefs.translateTarget },
@@ -333,7 +333,7 @@ struct AIFeaturesView: View {
 
     private var footnote: some View {
         Text("这些偏好只用于拼装本机的提示词，不会单独上传。")
-            .font(.system(size: 10.5))
+            .font(.app(10.5))
             .foregroundStyle(.tertiary)
             .padding(.top, 2)
     }
@@ -343,7 +343,7 @@ struct AIFeaturesView: View {
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.system(size: 11, weight: .medium))
+                .font(.app(11, weight: .medium))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
                 .kerning(0.5)
@@ -362,14 +362,14 @@ struct AIFeaturesView: View {
     private func toggleRow(icon: String, title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 12))
+                .font(.app(12))
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 12.5, weight: .medium))
+                Text(title).font(.app(12.5, weight: .medium))
                 Text(subtitle)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -386,20 +386,20 @@ struct AIFeaturesView: View {
         Button(action: action) {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 12.5, weight: .medium))
+                    Text(title).font(.app(12.5, weight: .medium))
                     Text(subtitle)
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 9))
+                    .font(.app(9))
                     .foregroundStyle(.tertiary)
                     .padding(.top, 3)
             }
@@ -417,10 +417,10 @@ struct AIFeaturesView: View {
     ) -> some View where T.RawValue == String {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 12))
+                .font(.app(12))
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
-            Text(title).font(.system(size: 12.5))
+            Text(title).font(.app(12.5))
             Spacer()
             Picker("", selection: selection) {
                 ForEach(options) { option in

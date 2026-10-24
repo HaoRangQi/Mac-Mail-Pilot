@@ -67,13 +67,13 @@ struct AddProviderView: View {
     private var header: some View {
         HStack {
             Text("添加自定义提供商")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
             Spacer()
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06), in: Circle())
@@ -109,8 +109,8 @@ struct AddProviderView: View {
     private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: icon).font(.system(size: 10.5))
-                Text(title).font(.system(size: 11.5))
+                Image(systemName: icon).font(.app(10.5))
+                Text(title).font(.app(11.5))
             }
             .padding(.horizontal, 11)
             .frame(height: 28)
@@ -125,12 +125,12 @@ struct AddProviderView: View {
     private var nameField: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 2) {
-                Text("提供商名称").font(.system(size: 12, weight: .medium))
-                Text("*").font(.system(size: 12)).foregroundStyle(.red)
+                Text("提供商名称").font(.app(12, weight: .medium))
+                Text("*").font(.app(12)).foregroundStyle(.red)
             }
             TextField("例如 OpenAI", text: $form.name)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.app(13))
                 .padding(.horizontal, 10)
                 .frame(height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -140,7 +140,7 @@ struct AddProviderView: View {
 
     private var keyField: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text("API 密钥").font(.system(size: 12, weight: .medium))
+            Text("API 密钥").font(.app(12, weight: .medium))
             HStack(spacing: 6) {
                 Group {
                     if form.reveal {
@@ -150,14 +150,14 @@ struct AddProviderView: View {
                     }
                 }
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5, design: .monospaced))
+                .font(.app(12.5, design: .monospaced))
                 .padding(.leading, 10)
 
                 Button {
                     form.reveal.toggle()
                 } label: {
                     Image(systemName: form.reveal ? "eye.slash" : "eye")
-                        .font(.system(size: 11.5))
+                        .font(.app(11.5))
                         .foregroundStyle(.secondary)
                         .frame(width: 26, height: 26)
                 }
@@ -172,7 +172,7 @@ struct AddProviderView: View {
 
     private var endpointBlock: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("端点设置").font(.system(size: 12, weight: .medium))
+            Text("端点设置").font(.app(12, weight: .medium))
 
             Picker("", selection: $form.kind) {
                 ForEach(ProviderKind.allCases) { kind in
@@ -187,24 +187,24 @@ struct AddProviderView: View {
 
             HStack(spacing: 5) {
                 Image(systemName: form.kind.isLocal ? "lock.shield.fill" : "lock.shield")
-                    .font(.system(size: 10))
+                    .font(.app(10))
                 Text(form.kind.isLocal
                      ? "当前为本地模型，邮件内容不出本机"
                      : "推荐使用本地模型：邮件内容不会离开这台电脑")
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
             }
             .foregroundStyle(form.kind.isLocal ? Theme.moss : Color.secondary)
 
             TextField("Base URL：https://example.com", text: $form.baseURL)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5, design: .monospaced))
+                .font(.app(12.5, design: .monospaced))
                 .padding(.horizontal, 10)
                 .frame(height: 32)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
                 .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
 
             Text("实际请求：\(AIService.previewRequestURL(base: form.baseURL, kind: form.kind))")
-                .font(.system(size: 10.5, design: .monospaced))
+                .font(.app(10.5, design: .monospaced))
                 .foregroundStyle(.tertiary)
                 .lineLimit(2)
                 .textSelection(.enabled)
@@ -217,10 +217,10 @@ struct AddProviderView: View {
                 withAnimation(.easeInOut(duration: 0.15)) { form.showAdvanced.toggle() }
             } label: {
                 HStack {
-                    Text("更多设置").font(.system(size: 12, weight: .medium))
+                    Text("更多设置").font(.app(12, weight: .medium))
                     Spacer()
                     Image(systemName: form.showAdvanced ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
@@ -230,11 +230,11 @@ struct AddProviderView: View {
             if form.showAdvanced {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("默认模型 ID（可留空，稍后同步）")
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(.secondary)
                     TextField("例如 gpt-4o-mini", text: $form.model)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12.5, design: .monospaced))
+                        .font(.app(12.5, design: .monospaced))
                         .padding(.horizontal, 10)
                         .frame(height: 30)
                         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -250,7 +250,7 @@ struct AddProviderView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Text("密钥仅保存在本机")
-                .font(.system(size: 10.5))
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
             Spacer()
             Button("取消") { dismiss() }

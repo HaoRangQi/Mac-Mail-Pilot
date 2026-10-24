@@ -81,9 +81,9 @@ struct ModelPickerView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text("选择模型")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
             Text("\(catalog.count)")
-                .font(.system(size: 10.5, weight: .medium))
+                .font(.app(10.5, weight: .medium))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 6)
                 .frame(height: 18)
@@ -94,7 +94,7 @@ struct ModelPickerView: View {
             }
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 26, height: 26)
                     .background(Color.primary.opacity(0.06), in: Circle())
@@ -111,15 +111,15 @@ struct ModelPickerView: View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                 TextField("搜索模型…", text: $form.query)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
+                    .font(.app(12.5))
                 if !form.query.isEmpty {
                     Button { form.query = "" } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .foregroundStyle(.tertiary)
                     }
                     .buttonStyle(.plain)
@@ -131,28 +131,28 @@ struct ModelPickerView: View {
 
             HStack(spacing: 8) {
                 Text("已选 \(provider?.models.count ?? 0) / \(catalog.count)")
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("全选") { selectAll(true) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
-                Text("·").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text("·").font(.app(10)).foregroundStyle(.tertiary)
                 Button("清空") { selectAll(false) }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
                 Toggle("只看对话模型", isOn: $form.onlyChat)
                     .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(.secondary)
                 if hiddenCount > 0 {
                     Text("已隐藏 \(hiddenCount) 个图像 / 语音 / 向量模型")
-                        .font(.system(size: 10.5))
+                        .font(.app(10.5))
                         .foregroundStyle(.tertiary)
                 }
                 Spacer()
@@ -170,7 +170,7 @@ struct ModelPickerView: View {
             LazyVStack(spacing: 0) {
                 if filtered.isEmpty {
                     Text(form.busy ? "正在拉取模型列表…" : "没有匹配的模型")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.tertiary)
                         .padding(.vertical, 40)
                 }
@@ -192,17 +192,17 @@ struct ModelPickerView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(selected ? Theme.accent : Color.secondary.opacity(0.45))
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text(provider?.displayName(for: model) ?? model)
-                        .font(.system(size: 12.5))
+                        .font(.app(12.5))
                         .foregroundStyle(selected ? Color.primary : Color.secondary)
                         .lineLimit(1)
                     if let p = provider, p.displayName(for: model) != model {
                         Text(model)
-                            .font(.system(size: 9.5, design: .monospaced))
+                            .font(.app(9.5, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .lineLimit(1)
                     }
@@ -210,7 +210,7 @@ struct ModelPickerView: View {
 
                 if let group = provider?.groupName(for: model), !group.isEmpty {
                     Text(group)
-                        .font(.system(size: 9.5))
+                        .font(.app(9.5))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 5)
                         .frame(height: 15)
@@ -219,7 +219,7 @@ struct ModelPickerView: View {
 
                 if isCurrent {
                     Text("当前")
-                        .font(.system(size: 9.5))
+                        .font(.app(9.5))
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 5)
                         .frame(height: 15)
@@ -229,7 +229,7 @@ struct ModelPickerView: View {
                 Spacer(minLength: 6)
 
                 Image(systemName: selected ? "minus.circle" : "plus.circle")
-                    .font(.system(size: 13))
+                    .font(.app(13))
                     .foregroundStyle(selected ? Theme.brick.opacity(0.75) : Theme.accent)
             }
             .padding(.horizontal, 8)
@@ -246,7 +246,7 @@ struct ModelPickerView: View {
             Button("添加模型") { form.showAdd = true }
             if let status = form.status {
                 Text(status)
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }

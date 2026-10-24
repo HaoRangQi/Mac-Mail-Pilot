@@ -40,7 +40,7 @@ struct ProviderAvatar: View {
                 ZStack {
                     AvatarPalette.color(for: provider)
                     Text(provider.initial.isEmpty ? "?" : provider.initial)
-                        .font(.system(size: size * 0.42, weight: .medium))
+                        .font(.app(size * 0.42, weight: .medium))
                         .foregroundStyle(.white)
                 }
             }

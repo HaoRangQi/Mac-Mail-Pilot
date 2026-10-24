@@ -29,16 +29,16 @@ struct AddRedactionRuleView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(existing == nil ? "添加脱敏规则" : "编辑脱敏规则")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.app(14, weight: .semibold))
 
             field("名称", text: $form.name, placeholder: "如：项目代号", monospaced: false)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("正则")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                 TextField("如：XQ-[0-9]{4}", text: $form.pattern)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .padding(.horizontal, 9)
                     .frame(height: 30)
                     .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
@@ -46,9 +46,9 @@ struct AddRedactionRuleView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("测试文本")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                 TextEditor(text: $form.testText)
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .scrollContentBackground(.hidden)
                     .frame(height: 68)
                     .padding(8)
@@ -57,10 +57,10 @@ struct AddRedactionRuleView: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text("命中效果")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
 
                 Text(preview)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.app(12, design: .monospaced))
                     .foregroundStyle(hitCount > 0 ? Theme.moss : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -68,7 +68,7 @@ struct AddRedactionRuleView: View {
                     .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
 
                 Text(hitCount > 0 ? "命中 \(hitCount) 处" : "没有命中——正则可能有误")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(hitCount > 0 ? Theme.moss : Theme.gold)
             }
 
@@ -97,10 +97,10 @@ struct AddRedactionRuleView: View {
     private func field(_ label: String, text: Binding<String>, placeholder: String, monospaced: Bool) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(label)
-                .font(.system(size: 12, weight: .medium))
+                .font(.app(12, weight: .medium))
             TextField(placeholder, text: text)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: monospaced ? .monospaced : nil))
+                .font(.app(12, design: monospaced ? .monospaced : nil))
                 .padding(.horizontal, 9)
                 .frame(height: 30)
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))

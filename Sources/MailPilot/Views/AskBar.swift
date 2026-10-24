@@ -54,7 +54,7 @@ struct AskBar: View {
                 Text(model.pendingToolCall?.humanSummary ?? "")
                 if model.pendingToolCall?.tool == .moveToTrash {
                     Text("只是移入「邮件」App 的废纸篓，可以在那里恢复。")
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -75,7 +75,7 @@ struct AskBar: View {
                 model.closeAsk()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(.app(8, weight: .bold))
                     .foregroundStyle(.secondary)
                     .frame(width: 16, height: 16)
                     .background(Color.primary.opacity(0.07), in: Circle())
@@ -91,7 +91,7 @@ struct AskBar: View {
                         model.deleteSelectedAsks()
                     } label: {
                         Text(model.askSelected.isEmpty ? "删除" : "删除（\(model.askSelected.count)）")
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .foregroundStyle(.red)
                     }
                     .buttonStyle(.plain)
@@ -102,19 +102,19 @@ struct AskBar: View {
                         model.askSelected = []
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                 } else {
                     Button("选择") {
                         model.askSelectMode = true
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.app(11))
 
                     Button("清空") {
                         ui.showClearConfirm = true
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(.app(11))
                 }
             }
         }
@@ -152,12 +152,12 @@ struct AskBar: View {
 
                 if model.askSelectMode {
                     Image(systemName: model.askSelected.contains(turn.id) ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(model.askSelected.contains(turn.id) ? Theme.accent : Color.secondary.opacity(0.5))
                 }
 
                 Text(turn.question)
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -171,17 +171,17 @@ struct AskBar: View {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.mini)
                     Text("正在读你的邮箱…")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                 }
             } else {
                 HStack(alignment: .top, spacing: 7) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .foregroundStyle(border)
                         .padding(.top, 3)
                     Text(turn.answer)
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .lineSpacing(4)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -190,14 +190,14 @@ struct AskBar: View {
 
             HStack(spacing: 6) {
                 Image(systemName: "at")
-                    .font(.system(size: 9))
+                    .font(.app(9))
                 Text(turn.accounts.joined(separator: "、"))
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
                 Text(stamp(turn.date))
-                    .font(.system(size: 10.5))
+                    .font(.app(10.5))
                     .monospacedDigit()
 
                 if model.askSelectMode {
@@ -205,7 +205,7 @@ struct AskBar: View {
                         model.toggleAskSelect(turn.id)
                     } label: {
                         Text(model.askSelected.contains(turn.id) ? "已选" : "选择")
-                            .font(.system(size: 10.5))
+                            .font(.app(10.5))
                     }
                     .buttonStyle(.plain)
                 } else {
@@ -213,7 +213,7 @@ struct AskBar: View {
                         model.deleteAskTurn(turn.id)
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.app(9, weight: .bold))
                             .foregroundStyle(.secondary)
                             .frame(width: 18, height: 18)
                             .background(Color.primary.opacity(0.10), in: Circle())
@@ -246,7 +246,7 @@ struct AskBar: View {
                         model.ask()
                     } label: {
                         Text(text)
-                            .font(.system(size: 11.5))
+                            .font(.app(11.5))
                             .foregroundStyle(Color(red: 0.45, green: 0.42, blue: 0.85))
                             .padding(.horizontal, 12)
                             .frame(height: 26)
@@ -270,25 +270,25 @@ struct AskBar: View {
             } label: {
                 HStack(alignment: .top, spacing: 6) {
                     Image(systemName: model.askAllAccounts ? "tray.full" : "person.crop.circle")
-                        .font(.system(size: 10))
+                        .font(.app(10))
                         .padding(.top, 1)
 
                     VStack(alignment: .leading, spacing: 1) {
                         ForEach(Array(model.askScopeNames.prefix(4)), id: \.self) { name in
                             Text(name)
-                                .font(.system(size: 11))
+                                .font(.app(11))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
                         if model.askScopeNames.count > 4 {
                             Text("等 \(model.askScopeNames.count) 个")
-                                .font(.system(size: 10))
+                                .font(.app(10))
                                 .foregroundStyle(.tertiary)
                         }
                     }
 
                     Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 7))
+                        .font(.app(7))
                         .padding(.top, 2)
                 }
                 .foregroundStyle(.secondary)
@@ -317,12 +317,12 @@ struct AskBar: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: model.askAllAccounts ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(model.askAllAccounts ? Theme.accent : Color.secondary.opacity(0.5))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("所有账号").font(.system(size: 12))
+                        Text("所有账号").font(.app(12))
                         Text("\(model.accounts.count) 个账号的邮件")
-                            .font(.system(size: 10))
+                            .font(.app(10))
                             .foregroundStyle(.tertiary)
                     }
                     Spacer()
@@ -339,7 +339,7 @@ struct AskBar: View {
                 LazyVStack(spacing: 0) {
                     if model.accounts.isEmpty {
                         Text("没有可用账号")
-                            .font(.system(size: 11))
+                            .font(.app(11))
                             .foregroundStyle(.tertiary)
                             .padding(.vertical, 18)
                     }
@@ -362,10 +362,10 @@ struct AskBar: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: picked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 11))
+                    .font(.app(11))
                     .foregroundStyle(picked ? Theme.accent : Color.secondary.opacity(0.5))
                 Text(account.name)
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .foregroundStyle(dimmed ? Color.secondary : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -391,12 +391,12 @@ struct AskBar: View {
 
     private var inputRow: some View {        HStack(spacing: 9) {
             Image(systemName: "sparkles")
-                .font(.system(size: 13.5, weight: .medium))
+                .font(.app(13.5, weight: .medium))
                 .foregroundStyle(border)
 
             TextField("随便问问…", text: $model.askText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.app(13))
                 .focused($focused)
                 .onSubmit { submit() }
 
@@ -407,7 +407,7 @@ struct AskBar: View {
                     submit()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 15))
+                        .font(.app(15))
                         .foregroundStyle(Theme.accent)
                 }
                 .buttonStyle(.plain)
@@ -416,7 +416,7 @@ struct AskBar: View {
                     model.closeAsk()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 13))
+                        .font(.app(13))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
@@ -433,7 +433,7 @@ struct AskBar: View {
         HStack(spacing: 8) {
             ProgressView().controlSize(.small)
             Text("正在读你的邮箱…")
-                .font(.system(size: 12))
+                .font(.app(12))
                 .foregroundStyle(.secondary)
             Spacer()
         }

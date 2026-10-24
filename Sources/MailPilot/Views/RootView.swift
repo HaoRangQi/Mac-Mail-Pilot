@@ -63,7 +63,7 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             if let toast = model.toast {
                 Text(toast)
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.regularMaterial, in: Capsule())
@@ -90,12 +90,12 @@ struct TopBar: View {
         HStack(spacing: 10) {
             HStack(spacing: 7) {
                 Image(systemName: "envelope.fill")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                     .foregroundStyle(.tint)
                 Text("MailPilot")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.app(13, weight: .semibold))
                 Text("0.2")
-                    .font(.system(size: 10))
+                    .font(.app(10))
                     .foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 13)
@@ -104,7 +104,7 @@ struct TopBar: View {
 
             if model.isDemo {
                 Text("演示数据")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.app(11, weight: .medium))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 9)
                     .frame(height: 24)
@@ -115,7 +115,7 @@ struct TopBar: View {
                 model.toggleAsk()
             } label: {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.app(13, weight: .medium))
                     .foregroundStyle(Theme.aiGradient)
                     .frame(width: 38, height: 30)
                     .glassEffect(.regular.interactive(), in: .capsule)
@@ -129,25 +129,28 @@ struct TopBar: View {
                 model.cycleAppearance()
             } label: {
                 Image(systemName: model.appearance.icon)
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
-            .help("外观：\(model.appearance.label)（点击切换）")
+            .help("外观：\(model.appearance.label)（点击切换，右键进外观设置）")
+            .contextMenu {
+                Button("外观设置…") { model.openSettings(tab: .appearance) }
+            }
 
             Button {
                 model.showSettings = true
             } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 12))
+                    .font(.app(12))
                     .foregroundStyle(.secondary)
                     .frame(width: 30, height: 30)
                     .glassEffect(.regular.interactive(), in: .circle)
             }
             .buttonStyle(.plain)
-            .help("模型服务设置")
+            .help("设置（⌘,）")
 
             Button {
                 Task { await model.reload() }
@@ -158,7 +161,7 @@ struct TopBar: View {
                         .frame(width: 30, height: 30)
                 } else {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12))
+                        .font(.app(12))
                         .foregroundStyle(.secondary)
                         .frame(width: 30, height: 30)
                         .glassEffect(.regular.interactive(), in: .circle)
@@ -172,7 +175,7 @@ struct TopBar: View {
                 model.composing = true
             } label: {
                 Label("写邮件", systemImage: "square.and.pencil")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.app(12, weight: .medium))
                     .padding(.horizontal, 4)
             }
             .buttonStyle(.glassProminent)
@@ -193,13 +196,13 @@ struct TopBar: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: trustBadge)
-                    .font(.system(size: 9.5))
+                    .font(.app(9.5))
                 Text(activeModelLabel)
-                    .font(.system(size: 11.5))
+                    .font(.app(11.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 7.5, weight: .semibold))
+                    .font(.app(7.5, weight: .semibold))
             }
             .foregroundStyle(model.ai.activeModelTrusted ? Color.secondary : Theme.gold)
             .padding(.horizontal, 10)
@@ -239,11 +242,11 @@ struct TopBar: View {
 
     private var searchField: some View {        HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+                .font(.app(11))
                 .foregroundStyle(searchFocused ? Theme.moss : Color.secondary)
             TextField("搜索邮件", text: $model.query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12.5))
+                .font(.app(12.5))
                 .focused($searchFocused)
                 .tint(Theme.moss)
                 .onChange(of: model.query) { _, _ in model.scheduleSearch() }
@@ -253,7 +256,7 @@ struct TopBar: View {
                     model.scheduleSearch()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(.app(11))
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
