@@ -61,7 +61,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 
 /// 阅读页 AI 动作类型。决定生成结果下方给哪些操作按钮：
 /// 摘要 / 分类只要复制；只有回复才需要编辑、存草稿、发送。
-enum AIAction {
+enum AIAction: Hashable {
     case summarize
     case reply
     case classify
@@ -97,6 +97,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiBusy = false
     /// 这次输出是哪个动作产生的——决定下方按钮给哪些（摘要不需要「存草稿/发送」）
     @Published var aiAction: AIAction?
+    /// 本次输出是否来自可信模型。false 时界面要明确标注数据已外发给不可信服务商
+    @Published var aiOutputTrusted = true
     /// 回复草稿的编辑态
     @Published var aiEditing = false
     @Published var aiDraftText = ""
@@ -410,16 +412,20 @@ final class AppModel: ObservableObject {    // 数据
     private func run(prompt: String, message: Message, fallback: () -> String) async {
         let system = prefs.systemPrompt(styleSamples: sentSamples)
         guard let provider = ai.activeProvider else {
+            aiOutputTrusted = true          // 本地兜底，数据没出本机
             aiOutput = fallback() + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
             aiBusy = false
             return
         }
+        // 记录本次数据去了哪：不可信模型时界面要标出来
+        aiOutputTrusted = provider.isTrusted(provider.selectedModel)
         do {
             let text = try await AIService.chat(provider: provider,
                                                 system: system,
                                                 user: prompt + "\n\n" + context(message))
             aiOutput = text
         } catch {
+            aiOutputTrusted = true          // 失败后走的是本地结果
             aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n" + fallback()
         }
         aiBusy = false

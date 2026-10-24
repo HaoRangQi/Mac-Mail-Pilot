@@ -192,7 +192,7 @@ struct TopBar: View {
             ui.showModelPicker.toggle()
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "cpu")
+                Image(systemName: trustBadge)
                     .font(.system(size: 9.5))
                 Text(activeModelLabel)
                     .font(.system(size: 11.5))
@@ -201,14 +201,14 @@ struct TopBar: View {
                 Image(systemName: "chevron.down")
                     .font(.system(size: 7.5, weight: .semibold))
             }
-            .foregroundStyle(model.ai.isConfigured ? Color.secondary : Theme.gold)
+            .foregroundStyle(model.ai.activeModelTrusted ? Color.secondary : Theme.gold)
             .padding(.horizontal, 10)
             .frame(height: 30)
             .frame(maxWidth: 200)
             .glassEffect(.regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
-        .help("当前模型：\(activeModelLabel)（点击切换）")
+        .help(modelPickerHelp)
         .popover(isPresented: $ui.showModelPicker, arrowEdge: .bottom) {
             ModelQuickPicker()
                 .environmentObject(model.ai)
@@ -219,6 +219,22 @@ struct TopBar: View {
     private var activeModelLabel: String {
         guard let provider = model.ai.activeProvider else { return "未配置模型" }
         return provider.displayName(for: provider.selectedModel)
+    }
+
+    private var trustBadge: String {
+        guard let provider = model.ai.activeProvider else { return "cpu" }
+        if provider.kind.isLocal { return "lock.shield.fill" }
+        return provider.isTrusted(provider.selectedModel) ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+    }
+
+    private var modelPickerHelp: String {
+        guard let provider = model.ai.activeProvider else {
+            return "还没有可用模型，点击配置"
+        }
+        let trust = provider.isTrusted(provider.selectedModel)
+            ? (provider.kind.isLocal ? "本地模型，数据不出本机" : "可信模型")
+            : "不可信模型，发送前会脱敏"
+        return "当前模型：\(provider.displayName(for: provider.selectedModel))（\(trust)）\n点击切换"
     }
 
     private var searchField: some View {        HStack(spacing: 6) {

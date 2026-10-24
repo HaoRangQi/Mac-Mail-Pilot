@@ -231,6 +231,15 @@ struct ReaderView: View {
 
             if let output = model.aiOutput {
                 VStack(alignment: .leading, spacing: 9) {
+                    if !model.aiOutputTrusted {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .font(.system(size: 9))
+                            Text("由不可信模型生成 · 邮件内容已发送到该服务商")
+                                .font(.system(size: 10.5))
+                        }
+                        .foregroundStyle(Theme.gold)
+                    }
                     if model.aiEditing {
                         TextEditor(text: $model.aiDraftText)
                             .font(.system(size: 12.5))

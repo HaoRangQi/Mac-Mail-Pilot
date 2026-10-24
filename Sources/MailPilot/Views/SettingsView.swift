@@ -183,6 +183,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     header(provider)
+                    trustSection(provider)
                     keySection(provider)
                     baseSection(provider)
                     modelSection(provider)
@@ -258,8 +259,107 @@ struct SettingsView: View {
         }
     }
 
-    private func keySection(_ provider: AIProvider) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+    // MARK: - 信任
+
+    // MARK: - 信任
+
+    /// 模型级信任切换：继承 → 强制可信 → 强制不可信 → 继承
+    private func nextTrustOverride(_ provider: AIProvider, _ model: String) -> Bool? {
+        switch provider.trustOverride(model) {
+        case .none: return true
+        case .some(true): return false
+        case .some(false): return nil
+        }
+    }
+
+    private func trustBadgeIcon(_ provider: AIProvider, _ model: String) -> String {
+        switch provider.trustOverride(model) {
+        case .none: return "shield.lefthalf.filled"
+        case .some(true): return "checkmark.shield.fill"
+        case .some(false): return "exclamationmark.shield.fill"
+        }
+    }
+
+    private func trustBadgeColor(_ provider: AIProvider, _ model: String) -> Color {
+        switch provider.trustOverride(model) {
+        case .none: return Color.secondary.opacity(0.55)
+        case .some(true): return Theme.moss
+        case .some(false): return Theme.gold
+        }
+    }
+
+    private func trustBadgeHelp(_ provider: AIProvider, _ model: String) -> String {
+        let inherited = provider.isTrustedProvider ? "可信" : "不可信"
+        switch provider.trustOverride(model) {
+        case .none:
+            return "继承供应商（\(inherited)）。点击改为「强制可信」"
+        case .some(true):
+            return "已强制可信，忽略供应商设置。点击改为「强制不可信」"
+        case .some(false):
+            return "已强制不可信，忽略供应商设置。点击恢复继承"
+        }
+    }
+
+    /// 供应商级信任开关。默认不可信，用户手动开启后其下模型才放行
+    private func trustSection(_ provider: AIProvider) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: trustIcon(provider))
+                .font(.system(size: 13))
+                .foregroundStyle(trustColor(provider))
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(trustTitle(provider))
+                    .font(.system(size: 12, weight: .medium))
+                Text(trustDetail(provider))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 8)
+
+            if !provider.kind.isLocal {
+                Toggle("", isOn: Binding(
+                    get: { provider.isTrustedProvider },
+                    set: { ai.setProviderTrusted(provider.id, $0) }
+                ))
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .controlSize(.small)
+                .help(provider.isTrustedProvider ? "关闭后其下模型全部回到不可信" : "开启后其下模型默认可信")
+            }
+        }
+        .padding(11)
+        .background(trustColor(provider).opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func trustIcon(_ provider: AIProvider) -> String {
+        if provider.kind.isLocal { return "lock.shield.fill" }
+        return provider.isTrustedProvider ? "checkmark.shield.fill" : "exclamationmark.shield"
+    }
+
+    private func trustColor(_ provider: AIProvider) -> Color {
+        if provider.kind.isLocal { return Theme.moss }
+        return provider.isTrustedProvider ? Theme.moss : Theme.gold
+    }
+
+    private func trustTitle(_ provider: AIProvider) -> String {
+        if provider.kind.isLocal { return "本地模型" }
+        return provider.isTrustedProvider ? "可信供应商" : "不可信供应商（默认）"
+    }
+
+    private func trustDetail(_ provider: AIProvider) -> String {
+        if provider.kind.isLocal {
+            return "数据不出本机，无需信任设置"
+        }
+        if provider.isTrustedProvider {
+            return "其下模型原样发送，不做脱敏、不弹确认。仅在你确认该服务商的数据政策可信时开启"
+        }
+        return "其下模型发送前会自动脱敏；草拟回复 / 翻译等会产生对外内容的动作，每次发送前需你确认"
+    }
+
+    private func keySection(_ provider: AIProvider) -> some View {        VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Text("API 密钥").font(.system(size: 12, weight: .medium))
                 if provider.allKeys.count > 1 {
@@ -457,6 +557,19 @@ struct SettingsView: View {
                 .font(.system(size: 12))
                 .lineLimit(1)
             Spacer()
+
+            if !provider.kind.isLocal {
+                Button {
+                    ai.setModelTrust(provider.id, model: model, nextTrustOverride(provider, model))
+                } label: {
+                    Image(systemName: trustBadgeIcon(provider, model))
+                        .font(.system(size: 11))
+                        .foregroundStyle(trustBadgeColor(provider, model))
+                }
+                .buttonStyle(.plain)
+                .help(trustBadgeHelp(provider, model))
+            }
+
             Button {
                 ai.update(id: provider.id) {
                     $0.models.removeAll { $0 == model }

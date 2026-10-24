@@ -98,6 +98,14 @@ struct ModelQuickPicker: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
+
+                if !provider.kind.isLocal, !provider.isTrusted(modelID) {
+                    Image(systemName: "exclamationmark.shield.fill")
+                        .font(.system(size: 9))
+                        .foregroundStyle(Theme.gold)
+                        .help("不可信模型：发送前会自动脱敏")
+                }
+
                 if selected {
                     Image(systemName: "checkmark")
                         .font(.system(size: 10, weight: .semibold))

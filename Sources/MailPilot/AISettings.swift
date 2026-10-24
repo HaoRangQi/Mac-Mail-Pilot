@@ -88,6 +88,10 @@ struct AIProvider: Identifiable, Codable, Hashable {
     var modelMeta: [String: ModelMeta]? = nil
     var selectedModel: String = ""
     var enabled: Bool = true
+    /// 供应商级可信。nil = 用户没表过态，一律按不可信处理
+    var trusted: Bool? = nil
+    /// 模型级信任覆盖：true / false 覆盖供应商设置；键不存在则继承供应商
+    var modelTrust: [String: Bool]? = nil
     var avatarImage: Data? = nil
     var avatarSeed: Int? = nil
 
@@ -129,6 +133,28 @@ struct AIProvider: Identifiable, Codable, Hashable {
             return purpose == .chat
         }
         return ModelFilter.isChat(modelID)
+    }
+
+    // MARK: - 信任
+
+    /// 供应商是否被标记为可信（未表态 = 不可信）
+    var isTrustedProvider: Bool { trusted ?? false }
+
+    /// 某个模型是否可信。
+    /// 本地模型恒可信——数据不出本机，没有外发风险，不该要求用户去「信任」它。
+    func isTrusted(_ modelID: String) -> Bool {
+        if kind.isLocal { return true }
+        if let override = modelTrust?[modelID] { return override }
+        return isTrustedProvider
+    }
+
+    /// 模型级覆盖状态：nil 表示继承供应商
+    func trustOverride(_ modelID: String) -> Bool? {
+        modelTrust?[modelID]
+    }
+
+    var trustedModelCount: Int {
+        models.filter { isTrusted($0) }.count
     }
 }
 
@@ -211,6 +237,31 @@ final class AISettingsStore: ObservableObject {
     func update(id: String, _ mutate: (inout AIProvider) -> Void) {
         guard let index = providers.firstIndex(where: { $0.id == id }) else { return }
         mutate(&providers[index])
+    }
+
+    // MARK: - 信任
+
+    func setProviderTrusted(_ providerID: String, _ value: Bool) {
+        update(id: providerID) { $0.trusted = value }
+    }
+
+    /// 传 nil 表示清除覆盖、回到「继承供应商」
+    func setModelTrust(_ providerID: String, model: String, _ value: Bool?) {
+        update(id: providerID) { provider in
+            var map = provider.modelTrust ?? [:]
+            if let value {
+                map[model] = value
+            } else {
+                map.removeValue(forKey: model)
+            }
+            provider.modelTrust = map.isEmpty ? nil : map
+        }
+    }
+
+    /// 当前生效的 provider + model 是否可信
+    var activeModelTrusted: Bool {
+        guard let provider = activeProvider else { return false }
+        return provider.isTrusted(provider.selectedModel)
     }
 
     // MARK: - 密钥
