@@ -389,7 +389,11 @@ struct ReaderView: View {
         case .translate: actionName = "翻译"
         }
         var text = "动作：\(actionName)\n"
-        text += "发送到：\(request.provider.name)（\(request.provider.baseURL)）\n"
+        if let provider = request.provider {
+            text += "发送到：\(provider.name)（\(provider.baseURL)）\n"
+        } else {
+            text += "发送到：演示模式，不会真的发出去\n"
+        }
         text += "内容量：\(request.charCount) 字符\n"
         if request.mappings.isEmpty {
             text += "未脱敏：邮件内容将原样发送"

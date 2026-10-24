@@ -54,6 +54,63 @@ final class DemoStore: MailStore {
         func ago(_ hours: Double) -> Date { now.addingTimeInterval(-hours * 3600) }
 
         all = [
+            // ---- 敏感信息样本：用于验证脱敏、收件人分组、外发预览 ----
+            Message(
+                id: "msg-101", accountID: "acc-work", mailboxID: "mb-work-inbox",
+                subject: "华信科技 Q4 设备采购合同 · 签约信息确认",
+                sender: "李思远", senderEmail: "lisiyuan@huaxin-tech.com",
+                recipients: ["me@company.com"],
+                cc: ["legal@huaxin-tech.com", "zhangwei@acme-corp.com"],
+                date: ago(1),
+                preview: "王总您好，关于 Q4 设备采购合同，双方已就条款达成一致。以下是我方签约主体信息……",
+                body: """
+                王总您好，
+
+                关于 Q4 设备采购合同，双方已就条款达成一致。以下是我方签约主体信息，请贵司核对：
+
+                · 签约联系人：李思远（手机 13812345678，邮箱 lisiyuan@huaxin-tech.com）
+                · 对公账户：招商银行 6225 8801 2345 6789
+                · 合同总额：¥1,286,400.00，分三期支付，首期 40% 于签约后 5 个工作日内到账
+                · 交付保证金：20万元，验收合格后无息退还
+                · 我方法务：赵敏，身份证号 110105198807154321，电话 13900001111
+
+                另请把技术方案书回传至 lisiyuan@huaxin-tech.com，抄送法务组 legal@huaxin-tech.com。
+
+                我方服务器 10.20.30.40 已开放 VPN 接入，贵司可联调测试。
+
+                顺祝商祺
+                李思远
+                华信科技 · 商务总监
+                """,
+                unread: true, needsReply: true, threadID: "th-huaxin-contract"
+            ),
+            Message(
+                id: "msg-102", accountID: "acc-icloud", mailboxID: "mb-icloud-inbox",
+                subject: "您的 Yahoo 账户刚刚在一台新设备上登录",
+                sender: "Yahoo 账户安全", senderEmail: "no-reply@cc.yahoo.com",
+                recipients: ["me@icloud.com"],
+                date: ago(3),
+                preview: "如果这不是您本人操作，请立即修改密码并开启两步验证……",
+                body: """
+                您的 Yahoo 账户刚刚在一台新设备上登录。
+
+                设备：MacBook Pro · macOS 15.1
+                时间：2026年10月24日 09:42
+                IP 地址：220.181.38.148
+                地点：中国 北京
+
+                登录账号：yhcopilot@yahoo.com
+                绑定手机：18612349876
+                备用邮箱：backup2024@gmail.com
+
+                账户内订阅状态：
+                · Yahoo Mail Plus 续费金额 ¥198.00/年，下次扣款 11月3日
+                · 云存储扩容 2TB，费用 128元/月
+
+                如果这不是您本人操作，请立即联系客服 4001234567 或回信至 security@yahoo-inc.com。
+                """,
+                unread: true, flagged: true, threadID: "th-yahoo-security"
+            ),
             // ---- 公司邮箱 ----
             Message(
                 id: "msg-001", accountID: "acc-work", mailboxID: "mb-work-inbox",

@@ -416,7 +416,7 @@ final class AppModel: ObservableObject {    // 数据
     /// 待确认的 AI 请求（不可信模型 + 会产生对外内容的动作时弹框）
     struct PendingAIRequest {
         let action: AIAction
-        let provider: AIProvider
+        let provider: AIProvider?
         let system: String
         let user: String
         let fallbackText: String
@@ -424,6 +424,8 @@ final class AppModel: ObservableObject {    // 数据
         let charCount: Int
         /// 脱敏后实际发送的文本，供用户在确认框里逐字检查
         let outboundPreview: String
+        /// 演示模式：不真的发请求，确认后直接给本地结果
+        let simulated: Bool
     }
 
     /// 所有 AI 调用的唯一入口：查策略 → 脱敏 → 需要确认则挂起 → 发送 → 还原。
@@ -435,6 +437,31 @@ final class AppModel: ObservableObject {    // 数据
         let fallbackText = fallback()
 
         guard let provider = ai.activeProvider else {
+            // 演示模式下没有可用模型，也走一遍完整的「脱敏 → 确认 → 预览」链路，
+            // 确认后给本地结果。否则用户不配 key 就永远看不到管控长什么样。
+            if isDemo {
+                let user = prompt + "\n\n" + context(message)
+                let redacted = Redactor.redact(
+                    user,
+                    disabledRules: prefs.prefs.disabledRedactionRules,
+                    customRules: prefs.prefs.customRedactionRules,
+                    keywords: prefs.prefs.redactionKeywords
+                )
+                aiOutputTrusted = false
+                pendingAI = PendingAIRequest(
+                    action: action,
+                    provider: nil,
+                    system: "",
+                    user: redacted.text,
+                    fallbackText: fallbackText,
+                    mappings: redacted.mappings,
+                    charCount: redacted.text.count,
+                    outboundPreview: redacted.text,
+                    simulated: true
+                )
+                return
+            }
+
             aiOutputTrusted = true
             aiOutput = fallbackText + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
             return
@@ -474,7 +501,8 @@ final class AppModel: ObservableObject {    // 数据
             fallbackText: fallbackText,
             mappings: mappings,
             charCount: user.count,
-            outboundPreview: user
+            outboundPreview: user,
+            simulated: false
         )
 
         if decision.needsConfirmation {
@@ -492,11 +520,25 @@ final class AppModel: ObservableObject {    // 数据
     }
 
     private func performAI(_ request: PendingAIRequest) {
+        // 演示模式：不真的发请求，直接给本地结果
+        if request.simulated {
+            aiBusy = false
+            aiOutputTrusted = false
+            aiOutput = request.fallbackText
+                + "\n\n（演示模式：未配置真实模型，以上为本地生成。上面的确认框展示了不可信模型的完整管控流程。）"
+            return
+        }
+
         aiBusy = true
+        guard let provider = request.provider else {
+            aiBusy = false
+            errorMessage = "配置缺失：找不到可用的模型服务商"
+            return
+        }
         Task { @MainActor in
             do {
                 let text = try await AIService.chat(
-                    provider: request.provider,
+                    provider: provider,
                     system: request.system,
                     user: request.user
                 )
