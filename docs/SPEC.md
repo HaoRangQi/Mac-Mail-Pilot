@@ -41,7 +41,14 @@
 
 关键点：`MailStore` 是协议，视图层不关心数据来自演示还是真实文件。接真实邮件时只换实现，界面零改动。
 
-`MailMutator` 与 `MailSender` 同构：都不碰邮件存储，只通过 AppleScript 让「邮件」App 自己动手。删除的定位链是 账户名 → 邮箱名 → RFC 2822 Message-ID（与 Apple Mail MCP 服务器同一方案），Message-ID 由 `EmlxParser` 从头解析获得；账户名 / 邮箱名定位均有回退（地址匹配、全邮箱扫描、`delete` 失败改显式 `move` 到废纸篓）。
+`MailMutator` 与 `MailSender` 同构：都不碰邮件存储，只通过 AppleScript 让「邮件」App 自己动手。删除的定位链经实测收敛为：
+
+- **账户**：`id of account`（UUID，对应 `~/Library/Mail/V10/<UUID>` 目录名）→ 显示名 → 邮箱地址 → 唯一账户
+- **邮箱**：指定邮箱（`rawName`）→ 该账户下所有非空邮箱 → **全库按 Message-ID 扫描**（跳过空邮箱）
+- **消息**：Message-ID 同时按**裸值**与**带尖括号**两种格式匹配（`whose (message id is bareId or message id is angleId)`）。Mail.app 的 `message id` 有时不带尖括号，RFC 2822 头里是 `<id@host>`，只比一种会永远匹配不到
+- **动作**：`delete` → 显式 `move` 到 `account of m` 的废纸篓
+
+Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首封邮件的真实 `message id` 作为样本随错误返回，用于判断是格式差异还是邮件不在 Mail 索引里。
 
 ## 4. 当前实现状态
 
@@ -63,7 +70,7 @@
 - **关于页**：设置的第四个 Tab（权限管理 / 模型服务 / AI 功能 / 关于），含数据来源、数据位置、隐私说明、打开数据目录；菜单「关于 MailPilot」会打开设置并跳到该 Tab
 - AI 栏三个动作已接真实模型；未配置时回退到本地规则生成，并明确提示
 - **发送双路**：`mailto` 打开撰写窗口；AppleScript 创建撰写窗口，可选"直接发送"
-- **真实删除**：阅读页垃圾桶按钮 → 二次确认 → `MailMutator` 用 AppleScript 让「邮件」App 把邮件移入该账户的废纸篓。`.emlx` 随之移出原邮箱目录、Envelope Index 与 IMAP 服务器同步更新，刷新不会复活；弹框文案如实说明去向。首次执行需在系统弹窗中允许 MailPilot 控制「邮件」（隐私与安全性 → 自动化）
+- **真实删除**：阅读页垃圾桶按钮 → 二次确认 → `MailMutator` 用 AppleScript 让「邮件」App 把邮件移入该账户的废纸篓。`.emlx` 随之移出原邮箱目录、Envelope Index 与 IMAP 服务器同步更新，刷新不会复活；弹框文案如实说明去向。首次执行需在系统弹窗中允许 MailPilot 控制「邮件」（隐私与安全性 → 自动化）。**2026-10-24 实测通过**：native 模式下删除成功，邮件进入 Mail 废纸篓。定位链最终形态见第 3 节
 - 启动状态落盘 `~/Library/Application Support/MailPilot/status.txt`（store 模式 + FDA 状态），诊断文件 `diagnose.txt` 补充 rawName / 账户名 / 邮箱地址 / Message-ID，用于排查权限与定位问题
 - 打包脚本 `scripts/build.sh`，输出 `build/MailPilot.app`（ad-hoc 签名）
 
@@ -75,8 +82,8 @@
 未完成：
 
 - "按提示找邮件 → 确认批量处理"的完整交互（AI 目前只能回答，不能执行动作）
-- 删除链路实测：用户重新授权 FDA 后验证（首次删除另有自动化授权弹窗）
 - 附件保存、规则、归档、会话视图
+- **邮件正文渲染**：纯文本邮件的 HTML 版本里，`<style>` 块中的 CSS 被当成正文显示（截图可见 `html { -webkit-text-size-adjust:none; }` 之类），需要剥离 style/script 整块并保留可读排版
 - （可选）固定签名证书免除每次编译后重授权（FDA 与自动化都受益）。用户目前接受手动重新授权，暂缓；若重启此项，注意上次失败的根因是 openssl 3 默认用 AES-256-CBC + SHA256 导出 PKCS12，macOS `security import` 不认——加 `-legacy`（或 `-macalg sha1 -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES`）可解决；证书还需带 `extendedKeyUsage=codeSigning` 才会被 `codesign` 识别
 
 ## 5. 已知约束
