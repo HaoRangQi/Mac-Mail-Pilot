@@ -3,6 +3,11 @@ import SwiftUI
 final class AskBarUI: ObservableObject {
     @Published var showScope = false
     @Published var showClearConfirm = false
+    /// 全屏：把浮层撑满窗口，长回答不用在 280pt 的小窗里挤
+    @Published var expanded = false
+    /// 正在编辑的提问（只允许改最新一条）
+    @Published var editingTurnID: String?
+    @Published var editingText = ""
 }
 
 struct AskBar: View {
@@ -11,6 +16,18 @@ struct AskBar: View {
     @StateObject private var ui = AskBarUI()
 
     private var border: LinearGradient { Theme.aiGradient }
+
+    /// 面板底色。薄材质叠在花哨背景图上时，`.secondary` 会被稀释到几乎看不见，
+    /// 所以在材质上再压一层窗口底色：玻璃感还在，但内容有了稳定的对比基准。
+    private var panelWash: some View {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.46))
+    }
+
+    /// 按钮文字用「明确的深色」而不是 `.secondary`——
+    /// 后者是给纯色背景设计的，在材质上会被背景色吃掉
+    private var inkStrong: Color { Color.primary.opacity(0.78) }
+    private var inkSoft: Color { Color.primary.opacity(0.55) }
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 8) {
@@ -27,13 +44,17 @@ struct AskBar: View {
             inputRow
         }
         .padding(10)
-        .frame(width: 580)
+        .frame(minWidth: ui.expanded ? 0 : 580,
+               maxWidth: ui.expanded ? .infinity : 580,
+               maxHeight: ui.expanded ? .infinity : nil)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(panelWash)
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(border, lineWidth: 1.2)
         )
         .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
+        .animation(.spring(response: 0.3, dampingFraction: 0.9), value: ui.expanded)
         .onExitCommand { model.closeAsk() }
         .onAppear { focused = true }
         .alert(
@@ -70,55 +91,81 @@ struct AskBar: View {
     // MARK: - 顶部
 
     private var topRow: some View {
-        HStack(spacing: 8) {
-            Button {
+        HStack(spacing: 10) {
+            chromeButton(icon: "xmark", help: "关闭（Esc）") {
                 model.closeAsk()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.app(8, weight: .bold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 16, height: 16)
-                    .background(Color.primary.opacity(0.07), in: Circle())
             }
-            .buttonStyle(.plain)
-            .help("关闭（Esc）")
 
             Spacer(minLength: 4)
 
+            chromeButton(icon: ui.expanded
+                         ? "arrow.down.right.and.arrow.up.left"
+                         : "arrow.up.left.and.arrow.down.right",
+                         help: ui.expanded ? "还原浮窗" : "全屏展开") {
+                ui.expanded.toggle()
+            }
+
             if !model.askHistory.isEmpty {
                 if model.askSelectMode {
-                    Button {
+                    chromeText(model.askSelected.isEmpty ? "删除" : "删除（\(model.askSelected.count)）",
+                               tint: model.askSelected.isEmpty ? Theme.brick.opacity(0.45) : Theme.brick) {
                         model.deleteSelectedAsks()
-                    } label: {
-                        Text(model.askSelected.isEmpty ? "删除" : "删除（\(model.askSelected.count)）")
-                            .font(.app(11))
-                            .foregroundStyle(.red)
                     }
-                    .buttonStyle(.plain)
                     .disabled(model.askSelected.isEmpty)
 
-                    Button("完成") {
+                    chromeText("全选", tint: .secondary) {
+                        model.askSelected = Set(model.askHistory.map(\.id))
+                    }
+
+                    chromeText("完成", tint: .secondary) {
                         model.askSelectMode = false
                         model.askSelected = []
                     }
-                    .buttonStyle(.plain)
-                    .font(.app(11))
                 } else {
-                    Button("选择") {
+                    chromeText("选择", tint: .secondary) {
                         model.askSelectMode = true
                     }
-                    .buttonStyle(.plain)
-                    .font(.app(11))
 
-                    Button("清空") {
+                    chromeText("清空", tint: Theme.brick) {
                         ui.showClearConfirm = true
                     }
-                    .buttonStyle(.plain)
-                    .font(.app(11))
+                    .help("清空全部对话记录（不可恢复）")
                 }
             }
         }
         .padding(.leading, 2)
+    }
+
+    /// 顶部工具按钮统一样式：同尺寸圆形底 + 同一档图标色。
+    /// 之前图标有的 8pt 有的 10pt、有的没底色，深浅不一，看着很散
+    private func chromeButton(icon: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.app(9.5, weight: .semibold))
+                .foregroundStyle(inkStrong)
+                .frame(width: 22, height: 22)
+                .background(Color.primary.opacity(0.13), in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.6))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// 顶部文字按钮：统一字号与内边距，只让颜色区分危险与否。
+    /// 文字按钮也补一层淡底，否则在材质上就是几团飘着的字
+    private func chromeText(_ title: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.app(11.5, weight: .medium))
+                .foregroundStyle(tint)
+                .padding(.horizontal, 9)
+                .frame(height: 22)
+                .background(tint.opacity(0.12), in: Capsule())
+                .overlay(Capsule().stroke(tint.opacity(0.26), lineWidth: 0.6))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - 历史
@@ -136,7 +183,7 @@ struct AskBar: View {
                 .padding(.vertical, 2)
             }
             .hoverScrollIndicators()
-            .frame(maxHeight: 280)
+            .frame(maxHeight: ui.expanded ? .infinity : 280)
             .onChange(of: model.askHistory.count) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo("bottom", anchor: .bottom)
@@ -146,7 +193,10 @@ struct AskBar: View {
     }
 
     private func turnView(_ turn: AskTurn) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let isLatest = model.askHistory.last?.id == turn.id
+        let editing = ui.editingTurnID == turn.id
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Spacer(minLength: 24)
 
@@ -156,11 +206,55 @@ struct AskBar: View {
                         .foregroundStyle(model.askSelected.contains(turn.id) ? Theme.accent : Color.secondary.opacity(0.5))
                 }
 
-                Text(turn.question)
-                    .font(.app(11.5))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                // 只有最新一条能改：改历史提问会让后面的回答对不上上下文
+                if isLatest, !model.askSelectMode, !editing {
+                    Button {
+                        ui.editingText = turn.question
+                        ui.editingTurnID = turn.id
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.app(9.5, weight: .medium))
+                            .foregroundStyle(inkStrong)
+                            .frame(width: 22, height: 22)
+                            .background(Color.primary.opacity(0.13), in: Circle())
+                            .overlay(Circle().stroke(Color.primary.opacity(0.12), lineWidth: 0.6))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("改一下再重跑")
+                }
+
+                if editing {
+                    TextField("", text: $ui.editingText)
+                        .textFieldStyle(.plain)
+                        .font(.app(11.5))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(Theme.accent.opacity(0.26),
+                                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .stroke(Theme.accent.opacity(0.55), lineWidth: 0.9)
+                        }
+                        .onSubmit { commitEdit(turn) }
+
+                    chromeText("重跑", tint: Theme.accent) { commitEdit(turn) }
+                    chromeText("取消", tint: .secondary) {
+                        ui.editingTurnID = nil
+                    }
+                } else {
+                    Text(turn.question)
+                        .font(.app(11.5))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        // 之前 14% 太淡，几乎看不出这是个气泡；加深并补一圈描边
+                        .background(Theme.accent.opacity(0.26),
+                                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                .stroke(Theme.accent.opacity(0.42), lineWidth: 0.7)
+                        }
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -180,12 +274,24 @@ struct AskBar: View {
                         .font(.app(10))
                         .foregroundStyle(border)
                         .padding(.top, 3)
-                    Text(turn.answer)
-                        .font(.app(12))
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
+
+                    // Markdown 渲染：标题 / 列表 / 代码块 / 粗体不再以源码形式露出
+                    MarkdownText(text: turn.answer, baseSize: 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+
+                // 每条回答的操作条：复制、重跑
+                HStack(spacing: 14) {
+                    answerAction("复制", icon: "doc.on.doc") {
+                        copyToPasteboard(turn.answer)
+                        model.showToast("已复制这条回答")
+                    }
+                    answerAction("重跑", icon: "arrow.clockwise") {
+                        Task { await model.rerunAsk(turn.id) }
+                    }
+                    Spacer()
+                }
+                .padding(.leading, 17)
             }
 
             HStack(spacing: 6) {
@@ -214,18 +320,50 @@ struct AskBar: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.app(9, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 18, height: 18)
-                            .background(Color.primary.opacity(0.10), in: Circle())
+                            .foregroundStyle(Theme.brick)
+                            .frame(width: 20, height: 20)
+                            .background(Theme.brick.opacity(0.16), in: Circle())
+                            .overlay(Circle().stroke(Theme.brick.opacity(0.28), lineWidth: 0.6))
                     }
                     .buttonStyle(.plain)
                     .help("删除这条记录")
                 }
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(inkSoft)
         }
         .padding(10)
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// 回答下方的小按钮（复制 / 重跑）
+    private func answerAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.app(9.5))
+                Text(title)
+                    .font(.app(10.5, weight: .medium))
+            }
+            .foregroundStyle(inkStrong)
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(Color.primary.opacity(0.08), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func commitEdit(_ turn: AskTurn) {
+        let text = ui.editingText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        ui.editingTurnID = nil
+        Task { await model.rerunAsk(turn.id, question: text) }
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
     }
 
     private func stamp(_ date: Date) -> String {

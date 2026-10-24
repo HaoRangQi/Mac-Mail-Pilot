@@ -1,6 +1,6 @@
 # MailPilot Native — 规格与实现状态
 
-> 2026-10-25 01:45 更新。原生 macOS App，SwiftUI + Liquid Glass。
+> 2026-10-25 02:45 更新。原生 macOS App，SwiftUI + Liquid Glass。
 
 ## 1. 产品定义
 
@@ -93,6 +93,10 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **阅读区增强**（0.2.35）：正文最大化（隐藏侧栏与列表，弹簧动画）、AI 结果整块折叠（内容不清空）、删除按钮移到动作行最前
 - **翻译专用模型**（0.2.36）：翻译可单独指定服务商 + 模型，未指定则跟随主模型；`requestAI` 增加 `route` 参数，信任判定 / 脱敏决策 / 实际请求都用 route 里的 model
 - **单封邮件安全开关**（0.2.36）：阅读页盾牌图标三态（模型可信 / 按策略脱敏 / 本封不脱敏），标记后该邮件在不可信模型上跳过脱敏与确认；按 Message-ID 存本地，隐私页有总览与一键清除
+- **侧边栏按服务商归类**（0.2.37）：三层结构「服务商 → 账号 → 邮箱」，`MailService.detect(email:)` 按邮箱域名识别 Gmail / Outlook / iCloud / Yahoo / QQ / 网易 / 其他；服务商与账号都可折叠，折叠键分别为 `svc:<名>` 与账号 id
+- **写邮件页 AI**（0.2.37）：主题行下方 AI 条，按意图起草正文；正文非空时切换为「AI 修稿」按意图改写全文。主题作为显式约束写进提示词防跑偏，不填主题则约束不出现。外发内容只有用户意图 + 主题（修稿时含当前正文），不可信模型仍脱敏但**不弹确认**——用户点「AI 起草」本身即明确外发意图，且邮件正文不在外发内容里
+- **AI 问答浮层 AskBar**（0.2.37）：Markdown 渲染（`MarkdownText`，按行切块 + `AttributedString` 行内样式）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。`MarkdownText` 的 `inline()` 返回 `some View`（`Text.textSelection` 不返回 Text）
+- **AI 问答空响应自愈**（0.2.37）：reasoning 模型 `content` 为空时自动重试一次（`tool_choice: none` + 要求直接回答），仍空则抛 `AIError.emptyResponse(diagnostic)`，诊断含 finish_reason / 是否只思考 / completion_tokens；Anthropic `max_tokens` 提到 4096
 
 部分完成 / 有已知缺陷：
 

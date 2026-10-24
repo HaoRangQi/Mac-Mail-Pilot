@@ -63,6 +63,8 @@ struct OnboardingView: View {
             .foregroundStyle(.tertiary)
             .padding(.top, 2)
 
+            demoHint
+
             if let hint = ui.hint {
                 Text(hint)
                     .font(.app(11))
@@ -71,6 +73,42 @@ struct OnboardingView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    /// 不授权也能用。第一次接触的人不该被"完全磁盘访问权限"卡住——
+    /// 先用演示数据把界面和 AI 功能走一遍，想授权时随时回来。
+    private var demoHint: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.app(10))
+                    .foregroundStyle(Theme.aiButtonGradient)
+                Text("还没准备好授权？")
+                    .font(.app(12, weight: .medium))
+            }
+
+            Text("先用演示数据把界面和 AI 功能走一遍——它不会读取你的任何邮件。之后随时可以在「设置 → 权限管理」里授权，切回真实邮件。")
+                .font(.app(11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                model.useDemoData()
+            } label: {
+                Text("用演示数据熟悉功能")
+                    .font(.app(11.5, weight: .medium))
+                    .padding(.horizontal, 12)
+                    .frame(height: 26)
+                    .background(Color.primary.opacity(0.07), in: Capsule())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("不读取任何真实邮件，随时可在设置里授权切换")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
     }
 
     private func step(_ index: Int, _ text: String) -> some View {
@@ -89,13 +127,6 @@ struct OnboardingView: View {
 
     private var footer: some View {
         HStack(spacing: 10) {
-            Button("先用演示数据") {
-                model.useDemoData()
-            }
-            .buttonStyle(.plain)
-            .font(.app(11.5))
-            .foregroundStyle(.secondary)
-
             Spacer()
 
             Button(ui.checking ? "检测中…" : "重新检测") {

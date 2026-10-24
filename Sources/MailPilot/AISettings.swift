@@ -333,6 +333,8 @@ enum AIError: LocalizedError {    case notConfigured
     case noKey
     case http(Int, String)
     case empty
+    /// 响应能解析但里面没有可用文本。带诊断信息，别让用户只看到「失败」两个字
+    case emptyResponse(String)
 
     var errorDescription: String? {
         switch self {
@@ -340,6 +342,7 @@ enum AIError: LocalizedError {    case notConfigured
         case .noKey: return "没有启用的 API 密钥"
         case .http(let code, let body): return "HTTP \(code)：\(body.prefix(200))"
         case .empty: return "模型没有返回内容"
+        case .emptyResponse(let detail): return "模型没有返回内容（\(detail)）"
         }
     }
 }
@@ -416,6 +419,12 @@ enum AIService {
         var lastError: Error = AIError.notConfigured
         for key in keys {
             do {
+                // 模型偶尔会「只想不做」：这一轮既没有工具调用、也没有正文
+                // （reasoning 模型把 token 全花在思考过程里时很常见）。
+                // 这种情况重试一次并强制它直接回答，比直接报错有用得多。
+                var forceNoTools = false
+                var emptyRetried = false
+
                 for _ in 0..<maxRounds {
                     var body: [String: Any] = [
                         "model": model,
@@ -423,7 +432,8 @@ enum AIService {
                         "temperature": 0.4,
                         "stream": false,
                     ]
-                    if !tools.isEmpty { body["tools"] = tools }
+                    if !tools.isEmpty, !forceNoTools { body["tools"] = tools }
+                    if forceNoTools { body["tool_choice"] = "none" }
 
                     let data = try await send(url: url, method: "POST",
                                               headers: authHeaders(provider.kind, key), body: body)
@@ -435,10 +445,18 @@ enum AIService {
 
                     let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
                     if rawCalls.isEmpty {
-                        guard let content = message["content"] as? String, !content.isEmpty else {
-                            throw AIError.empty
+                        if let content = messageText(message) { return content }
+
+                        if !emptyRetried {
+                            emptyRetried = true
+                            forceNoTools = true
+                            messages.append([
+                                "role": "user",
+                                "content": "请直接给出最终答案，不要调用任何工具，也不要只输出思考过程。",
+                            ])
+                            continue
                         }
-                        return content
+                        throw AIError.emptyResponse(emptyDiagnostic(json, choice, message))
                     }
 
                     // assistant 的原始消息必须原样回传，OpenAI 协议要求上下文里有这段 tool_calls
@@ -521,6 +539,40 @@ enum AIService {
 
     // MARK: - 请求构造
 
+    /// 从 message 里取正文。兼容三种写法：
+    /// 1. `content` 是字符串（标准）
+    /// 2. `content` 是分段数组（部分兼容实现）
+    /// 3. `reasoning_content` 有内容但 `content` 为空 —— 这种**不算答案**，交给重试逻辑处理
+    private static func messageText(_ message: [String: Any]) -> String? {
+        if let text = message["content"] as? String,
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return text
+        }
+        if let parts = message["content"] as? [[String: Any]] {
+            let text = parts.compactMap { $0["text"] as? String }.joined()
+            if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+        }
+        return nil
+    }
+
+    /// 空响应时给一句人话，说明到底是截断了、还是只思考了没输出
+    private static func emptyDiagnostic(_ json: [String: Any],
+                                        _ choice: [String: Any],
+                                        _ message: [String: Any]) -> String {
+        var parts: [String] = []
+        if let finish = choice["finish_reason"] as? String, !finish.isEmpty {
+            parts.append(finish == "length" ? "输出被长度限制截断" : "finish_reason=\(finish)")
+        }
+        if let reasoning = message["reasoning_content"] as? String, !reasoning.isEmpty {
+            parts.append("模型只输出了思考过程（\(reasoning.count) 字）")
+        }
+        if let usage = json["usage"] as? [String: Any],
+           let out = usage["completion_tokens"] as? Int {
+            parts.append("completion_tokens=\(out)")
+        }
+        return parts.isEmpty ? "响应里没有可用的文本" : parts.joined(separator: "；")
+    }
+
     private static func keyCandidates(_ provider: AIProvider) -> [String] {
         if provider.kind.isLocal { return [""] }
         let values = provider.enabledKeys.map(\.value).filter { !$0.isEmpty }
@@ -574,7 +626,8 @@ enum AIService {
         case .anthropic:
             return [
                 "model": model,
-                "max_tokens": 1024,
+                // 1024 对 reasoning 模型太紧，思考没写完就被截断，正文直接为空
+                "max_tokens": 4096,
                 "system": system,
                 "messages": [["role": "user", "content": user]],
             ]

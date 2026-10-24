@@ -5,6 +5,48 @@ struct Account: Identifiable, Hashable {
     var name: String
     var email: String
     var provider: String = ""
+
+    /// 侧边栏按服务商归大类用。只按邮箱域名判断，不依赖 Mail 的内部字段
+    var service: MailService { MailService.detect(email: email) }
+}
+
+/// 邮箱服务商。侧边栏用它把十几个账号收成几个大类，
+/// 否则 13 个账号平铺下来就是一堵墙。
+enum MailService: String, CaseIterable, Identifiable, Hashable {
+    case gmail, outlook, icloud, yahoo, qq, netease, other
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .gmail: return "Gmail"
+        case .outlook: return "Outlook"
+        case .icloud: return "iCloud"
+        case .yahoo: return "Yahoo"
+        case .qq: return "QQ 邮箱"
+        case .netease: return "网易邮箱"
+        case .other: return "其他"
+        }
+    }
+
+    static func detect(email: String) -> MailService {
+        let domain = email.split(separator: "@").last.map(String.init)?.lowercased() ?? ""
+        guard !domain.isEmpty else { return .other }
+
+        func any(_ suffixes: [String]) -> Bool {
+            suffixes.contains { domain == $0 || domain.hasSuffix("." + $0) }
+        }
+
+        if any(["gmail.com", "googlemail.com"]) { return .gmail }
+        if any(["outlook.com", "hotmail.com", "live.com", "msn.com", "outlook.jp", "hotmail.co.uk"]) {
+            return .outlook
+        }
+        if any(["icloud.com", "me.com", "mac.com"]) { return .icloud }
+        if any(["yahoo.com", "ymail.com", "yahoo.co.jp", "yahoo.com.hk"]) { return .yahoo }
+        if any(["qq.com", "foxmail.com"]) { return .qq }
+        if any(["163.com", "126.com", "yeah.net", "188.com"]) { return .netease }
+        return .other
+    }
 }
 
 struct Mailbox: Identifiable, Hashable {

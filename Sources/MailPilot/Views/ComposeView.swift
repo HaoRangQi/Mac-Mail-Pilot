@@ -11,6 +11,15 @@ final class ComposeForm: ObservableObject {
     @Published var sendNow = false
     @Published var sending = false
     @Published var scriptError: String?
+    /// 抄送 / 密送默认折叠：多数邮件用不到，常驻两行只是占地方
+    @Published var showCC = false
+    /// 正文 AI 起草
+    @Published var intent = ""
+    /// 上次提交给 AI 的意图。生成后输入框清空，这段以灰色占位显示，
+    /// 既能回看上一句要求，又不会被当成新输入误发
+    @Published var lastIntent = ""
+    @Published var drafting = false
+    @Published var aiError: String?
 }
 
 struct ComposeView: View {
@@ -26,17 +35,35 @@ struct ComposeView: View {
             VStack(spacing: 0) {
                 senderRow
                 rowDivider
-                field("收件人", text: $form.to, placeholder: "name@example.com，多个用逗号分隔")
+                recipientRow
                 rowDivider
-                field("抄送", text: $form.cc, placeholder: "可选")
-                rowDivider
-                field("密送", text: $form.bcc, placeholder: "可选")
-                rowDivider
+                if form.showCC {
+                    field("抄送", text: $form.cc, placeholder: "可选")
+                    rowDivider
+                    field("密送", text: $form.bcc, placeholder: "可选")
+                    rowDivider
+                }
                 field("主题", text: $form.subject, placeholder: "邮件主题")
+                rowDivider
+                aiDraftBar
                 rowDivider
                 bodyEditor
             }
             .padding(.vertical, 4)
+
+            if let aiError = form.aiError {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.app(10))
+                        .padding(.top, 1)
+                    Text(aiError)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.app(11))
+                .foregroundStyle(Theme.brick)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
+            }
 
             if let scriptError = form.scriptError {
                 HStack(alignment: .top, spacing: 6) {
@@ -60,6 +87,10 @@ struct ComposeView: View {
         .onAppear {
             if form.fromAccountID.isEmpty {
                 form.fromAccountID = model.accounts.first?.id ?? ""
+            }
+            // 抄送/密送里已经有内容时（比如以后从回复带入），别把它们藏起来
+            if !form.cc.isEmpty || !form.bcc.isEmpty {
+                form.showCC = true
             }
         }
     }
@@ -139,6 +170,158 @@ struct ComposeView: View {
         }
         .padding(.horizontal, 20)
         .frame(height: 38)
+    }
+
+    /// 收件人行，右侧带「抄送 / 密送」展开开关
+    private var recipientRow: some View {
+        HStack(spacing: 10) {
+            label("收件人")
+            TextField("name@example.com，多个用逗号分隔", text: $form.to)
+                .textFieldStyle(.plain)
+                .font(.app(12.5))
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.16)) {
+                    form.showCC.toggle()
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(form.showCC ? "收起" : "抄送/密送")
+                        .font(.app(10.5))
+                    Image(systemName: form.showCC ? "chevron.up" : "chevron.down")
+                        .font(.app(8, weight: .semibold))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 22)
+                .background(Color.primary.opacity(0.06), in: Capsule())
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(form.showCC ? "收起抄送与密送" : "展开抄送与密送")
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 38)
+    }
+
+    /// 正文上方的 AI 条：空正文时是「起草」，已有正文时是「修稿」
+    private var aiDraftBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: hasBody ? "wand.and.stars" : "sparkles")
+                .font(.app(11.5, weight: .semibold))
+                .foregroundStyle(Theme.aiButtonGradient)
+
+            // 系统自带的 placeholder 在深色主题下偏亮，看着像已经输入的内容。
+            // 这里自己画一段占位文字，颜色完全可控：
+            // 初始提示最淡，「上次：…」稍亮一点但仍明显淡于正文——一眼能分清哪些是"可看不可用"
+            ZStack(alignment: .leading) {
+                if form.intent.isEmpty {
+                    Text(intentPlaceholder)
+                        .font(.app(12))
+                        .foregroundStyle(form.lastIntent.isEmpty
+                                         ? Color.secondary.opacity(0.48)
+                                         : Color.secondary.opacity(0.68))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .allowsHitTesting(false)
+                }
+
+                TextField("", text: $form.intent)
+                    .textFieldStyle(.plain)
+                    .font(.app(12))
+                    .onSubmit { draft() }
+            }
+
+            if form.drafting {
+                ProgressView().controlSize(.small)
+            }
+
+            Button {
+                draft()
+            } label: {
+                Text(draftButtonTitle)
+                    .font(.app(11.5, weight: .medium))
+                    .foregroundStyle(canDraft ? Color.white : Color.secondary)
+                    .padding(.horizontal, 11)
+                    .frame(height: 24)
+                    .background(canDraft ? AnyShapeStyle(Theme.accent) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                                in: Capsule())
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canDraft)
+            .help(draftHelp)
+        }
+        .padding(.horizontal, 20)
+        .frame(height: 40)
+    }
+
+    /// 正文里有没有东西——决定按钮是「起草」还是「修稿」
+    private var hasBody: Bool {
+        !form.bodyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// 上一句要求以灰色占位留在输入框里：看得见，但不会被当成新输入
+    private var intentPlaceholder: String {
+        let last = form.lastIntent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !last.isEmpty {
+            return "上次：\(last)"
+        }
+        return hasBody
+            ? "说说要改什么，例如：语气再客气一点，补一句下周给排期"
+            : "说说这封邮件要写什么，例如：确认周三评审时间，并要一下排期表"
+    }
+
+    private var draftButtonTitle: String {
+        if form.drafting { return hasBody ? "修改中…" : "起草中…" }
+        return hasBody ? "AI 修稿" : "AI 起草"
+    }
+
+    private var draftHelp: String {
+        let base = hasBody
+            ? "用 \(model.aiDraftModelLabel) 按你的要求改写当前正文（会连同正文一起发送）"
+            : "用 \(model.aiDraftModelLabel) 根据意图生成正文"
+        let subject = form.subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        return subject.isEmpty
+            ? base + "。没填主题，只按意图写"
+            : base + "。会紧扣主题「\(subject)」，防止跑偏"
+    }
+
+    private var canDraft: Bool {
+        !form.drafting && !form.intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func draft() {
+        guard canDraft else { return }
+        form.aiError = nil
+        form.drafting = true
+        // 先把这次的要求存下来，再把输入框清空——
+        // 清空后 placeholder 会显示「上次：…」，用户一眼能回看刚才要了什么
+        let intent = form.intent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let subject = form.subject
+        let currentBody = form.bodyText
+        form.lastIntent = intent
+        form.intent = ""
+
+        Task { @MainActor in
+            do {
+                let text = try await model.draftComposeBody(
+                    intent: intent,
+                    subject: subject,
+                    currentBody: currentBody
+                )
+                form.bodyText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                model.showToast(currentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? "已生成正文，可直接修改"
+                                : "已按你的要求改好")
+            } catch {
+                form.aiError = error.localizedDescription
+                // 失败时把要求放回输入框，省得重打
+                form.intent = intent
+                form.lastIntent = ""
+            }
+            form.drafting = false
+        }
     }
 
     private var bodyEditor: some View {

@@ -74,6 +74,16 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
+enum ComposeAIError: LocalizedError {
+    case noModel
+
+    var errorDescription: String? {
+        switch self {
+        case .noModel: return "还没有可用的模型。先到「设置 → 模型服务」配置一个。"
+        }
+    }
+}
+
 /// 阅读页 AI 动作类型。决定生成结果下方给哪些操作按钮：
 /// 摘要 / 分类只要复制；只有回复才需要编辑、存草稿、发送。
 enum AIAction: String, Hashable {
@@ -446,6 +456,78 @@ final class AppModel: ObservableObject {    // 数据
             return active.displayName(for: active.selectedModel) + "（跟随主模型）"
         }
         return "未配置模型"
+    }
+
+    /// 写邮件页的正文起草。
+    ///
+    /// 和阅读页的 AI 动作不一样：外发的只有**用户自己敲的意图**（外加主题），
+    /// 不含任何邮件正文，所以不走「邮件内容外发」的确认流程——用户点「AI 起草」
+    /// 本身就是明确的外发意图，再弹一次确认只是噪音。
+    /// 但模型不可信时仍然先脱敏：规则一致，只是不打断。
+    func draftComposeBody(intent: String, subject: String, currentBody: String = "") async throws -> String {
+        guard let provider = ai.activeProvider else {
+            throw ComposeAIError.noModel
+        }
+        let model = provider.selectedModel
+        let trusted = provider.isTrusted(model)
+
+        let cleanSubject = subject.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = currentBody.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 主题是防跑偏最有力的锚点：有就明确要求紧扣，没有就完全不提，
+        // 免得在提示词里留一个空的「主题：」反而干扰模型
+        let subjectLine = cleanSubject.isEmpty ? "" : "邮件主题：\(cleanSubject)\n"
+        let subjectRule = cleanSubject.isEmpty
+            ? ""
+            : "正文必须紧扣主题「\(cleanSubject)」，不要偏题、不要扩写主题以外的内容。\n"
+
+        // 正文为空 → 起草；已有正文 → 按意图改写（这时正文也会一起外发，所以提示语里写明了）
+        var user: String
+        if body.isEmpty {
+            user = """
+            我要写一封邮件。
+            \(subjectLine)意图：\(intent)
+            \(subjectRule)直接输出邮件正文：中文、简洁专业、不要主题行、不要「以下是正文」这类说明，称呼与落款按需自然处理。
+            """
+        } else {
+            user = """
+            下面是我已经写好的一封邮件正文，请按我的要求改写它。
+            \(subjectLine)修改要求：\(intent)
+            \(subjectRule)当前正文：
+            ---
+            \(body)
+            ---
+            直接输出改写后的完整正文：中文、简洁专业、不要主题行、不要解释你改了什么。
+            """
+        }
+
+        var mappings: [Redactor.Mapping] = []
+        if !trusted {
+            let redacted = Redactor.redact(
+                user,
+                disabledRules: prefs.prefs.disabledRedactionRules,
+                customRules: prefs.prefs.customRedactionRules,
+                keywords: prefs.prefs.redactionKeywords
+            )
+            user = redacted.text
+            mappings = redacted.mappings
+        }
+
+        let text = try await AIService.chat(
+            provider: provider,
+            model: model,
+            system: prefs.systemPrompt(styleSamples: sentSamples),
+            user: user
+        )
+        return mappings.isEmpty ? text : Redactor.restore(text, mappings)
+    }
+
+    /// 写邮件页按钮提示里显示的模型名
+    var aiDraftModelLabel: String {
+        guard let provider = ai.activeProvider else { return "未配置模型" }
+        let trusted = provider.isTrusted(provider.selectedModel)
+        let name = provider.displayName(for: provider.selectedModel)
+        return trusted ? name : name + "（不可信，会先脱敏）"
     }
 
     // MARK: - 单封邮件豁免
@@ -860,13 +942,25 @@ final class AppModel: ObservableObject {    // 数据
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
-        guard let provider = ai.activeProvider else {
+        guard ai.activeProvider != nil else {
             errorMessage = "还没有配置模型。点右上角齿轮接入后才能使用问答。"
             return
         }
 
         askBusy = true
         defer { askBusy = false }
+
+        do {
+            let answer = try await runAsk(text)
+            appendAsk(question: text, answer: answer)
+        } catch {
+            errorMessage = "调用失败：\(error.localizedDescription)"
+        }
+    }
+
+    /// 真正发请求的那一步。首次提问和「重跑」共用
+    private func runAsk(_ text: String) async throws -> String {
+        guard let provider = ai.activeProvider else { throw AIError.notConfigured }
 
         let system = """
         你是 MailPilot 的邮件助理。你可以调用工具查询用户的邮件并回答问题。
@@ -880,19 +974,14 @@ final class AppModel: ObservableObject {    // 数据
         - moveToTrash 只是移入废纸篓，可以恢复，但仍需用户点头
         """
 
-        do {
-            let answer = try await AIService.chatWithTools(
-                provider: provider,
-                model: provider.selectedModel,
-                system: system,
-                user: text,
-                tools: MailTool.allCases.map { $0.toolSchema }
-            ) { call in
-                await self.executeToolCall(call)
-            }
-            appendAsk(question: text, answer: answer)
-        } catch {
-            errorMessage = "调用失败：\(error.localizedDescription)"
+        return try await AIService.chatWithTools(
+            provider: provider,
+            model: provider.selectedModel,
+            system: system,
+            user: text,
+            tools: MailTool.allCases.map { $0.toolSchema }
+        ) { call in
+            await self.executeToolCall(call)
         }
     }
 
@@ -1065,6 +1154,35 @@ final class AppModel: ObservableObject {    // 数据
 
     private func appendAsk(question: String, answer: String) {
         askHistory.append(AskTurn(question: question, answer: answer))
+        persistAsk()
+    }
+
+    /// 重跑某条提问：保留问题，重新生成回答（覆盖原来的）。
+    /// 传 `question` 时先改写问题再重跑——用户在气泡里编辑后点「重跑」走这条。
+    func rerunAsk(_ id: String, question newQuestion: String? = nil) async {
+        guard !askBusy,
+              let index = askHistory.firstIndex(where: { $0.id == id }) else { return }
+
+        if let newQuestion {
+            let trimmed = newQuestion.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { askHistory[index].question = trimmed }
+        }
+
+        let question = askHistory[index].question
+        askHistory[index].answer = ""     // 先清空，界面显示「正在读你的邮箱…」
+        askBusy = true
+        defer { askBusy = false }
+
+        do {
+            let answer = try await runAsk(question)
+            if let current = askHistory.firstIndex(where: { $0.id == id }) {
+                askHistory[current].answer = answer
+            }
+        } catch {
+            if let current = askHistory.firstIndex(where: { $0.id == id }) {
+                askHistory[current].answer = "调用失败：\(error.localizedDescription)"
+            }
+        }
         persistAsk()
     }
 
