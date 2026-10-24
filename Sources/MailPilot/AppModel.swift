@@ -92,6 +92,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var showDeleteConfirm = false
     /// 删除执行中（全库扫描兜底可能耗时，界面需要给出反馈）
     @Published var deleting = false
+    /// 待确认发送的 AI 正文（非 nil 时弹确认框）
+    @Published var pendingAISend: String?
     @Published var showOnboarding = false
 
     // 设置
@@ -475,6 +477,37 @@ final class AppModel: ObservableObject {    // 数据
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled else { return }
             toast = nil
+        }
+    }
+
+    // MARK: - AI 结果交付（作为当前邮件的回复）
+
+    /// 把 AI 生成的正文当作回复：存进「邮件」草稿箱，或直接发送。
+    /// 收件人取原邮件的发件人，主题补 Re:，发件账号取原邮件所属账户。
+    func deliverAIOutput(_ text: String, asDraft: Bool) async {
+        guard let message = selected else { return }
+        let to = message.senderEmail
+        guard !to.isEmpty else {
+            errorMessage = "这封邮件没有发件人地址，无法回复"
+            return
+        }
+        let from = accounts.first { $0.id == message.accountID }?.email ?? ""
+        let subject = message.subject.lowercased().hasPrefix("re:")
+            ? message.subject
+            : "Re: \(message.subject)"
+        let body = text
+
+        do {
+            try await Task.detached(priority: .userInitiated) {
+                try MailSender.compose(
+                    from: from, to: [to], cc: [], bcc: [],
+                    subject: subject, body: body,
+                    delivery: asDraft ? .saveDraft : .sendNow
+                )
+            }.value
+            showToast(asDraft ? "已存入「邮件」草稿箱" : "已交给「邮件」发送")
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 

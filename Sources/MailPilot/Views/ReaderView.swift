@@ -29,6 +29,22 @@ struct ReaderView: View {
                  ? "「\(message.subject)」\n\n当前是演示数据，只会从列表移除，不会动真实邮件。"
                  : "「\(message.subject)」\n\n将在「邮件」App 中移入该账户的废纸篓，可在邮件 App 里恢复。")
         }
+        .alert(
+            "确认发送这封回复？",
+            isPresented: Binding(
+                get: { model.pendingAISend != nil },
+                set: { presented in if !presented { model.pendingAISend = nil } }
+            )
+        ) {
+            Button("发送", role: .destructive) {
+                guard let text = model.pendingAISend else { return }
+                model.pendingAISend = nil
+                Task { await model.deliverAIOutput(text, asDraft: false) }
+            }
+            Button("取消", role: .cancel) { model.pendingAISend = nil }
+        } message: {
+            Text(sendConfirmMessage)
+        }
     }
 
     private var emptyState: some View {
@@ -214,16 +230,32 @@ struct ReaderView: View {
             }
 
             if let output = model.aiOutput {
-                ScrollView {
-                    Text(output)
-                        .font(.system(size: 12.5))
-                        .lineSpacing(4)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 9) {
+                    ScrollView {
+                        Text(output)
+                            .font(.system(size: 12.5))
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 150)
+                    .padding(11)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+
+                    HStack(spacing: 8) {
+                        resultButton("复制", icon: "doc.on.doc", tint: .secondary) {
+                            copyToPasteboard(output)
+                            model.showToast("已复制生成内容")
+                        }
+                        resultButton("存草稿", icon: "tray.and.arrow.down", tint: .secondary) {
+                            Task { await model.deliverAIOutput(output, asDraft: true) }
+                        }
+                        resultButton("发送", icon: "paperplane.fill", tint: Theme.moss) {
+                            model.pendingAISend = output
+                        }
+                        Spacer()
+                    }
                 }
-                .frame(maxHeight: 150)
-                .padding(11)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
                 .transition(.opacity)
             }
         }
@@ -249,7 +281,34 @@ struct ReaderView: View {
         .disabled(model.selected == nil)
     }
 
+    /// AI 结果下方的操作按钮（复制 / 存草稿 / 发送）
+    private func resultButton(_ title: String,
+                              icon: String,
+                              tint: Color,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 10.5))
+                Text(title).font(.system(size: 12))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 11)
+            .frame(height: 27)
+            .glassEffect(.regular.interactive(), in: .capsule)
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - 复制与日期
+
+    /// 发送确认框里说明收件人与主题，避免发错人
+    private var sendConfirmMessage: String {
+        guard let message = model.selected else { return "" }
+        let subject = message.subject.lowercased().hasPrefix("re:")
+            ? message.subject
+            : "Re: \(message.subject)"
+        return "收件人：\(message.displaySender) <\(message.senderEmail)>\n主题：\(subject)\n\n发送后无法撤回。"
+    }
 
     /// 收件人 / 抄送 / 密送 统一行：标签固定宽度让三行对齐，空列表整行不渲染
     @ViewBuilder

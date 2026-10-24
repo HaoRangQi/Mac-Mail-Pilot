@@ -40,6 +40,13 @@ enum MailSender {
 
     // MARK: - 路径二：AppleScript
 
+    /// 交付方式：只开窗口 / 立即发送 / 存草稿
+    enum Delivery {
+        case openWindow
+        case sendNow
+        case saveDraft
+    }
+
     /// 正文与主题走临时文件传入，避免 AppleScript 字符串转义的坑。
     /// `from` 为空时不设置 sender，由「邮件」App 用默认账号。
     static func compose(from: String,
@@ -48,7 +55,7 @@ enum MailSender {
                         bcc: [String],
                         subject: String,
                         body: String,
-                        sendNow: Bool) throws {
+                        delivery: Delivery) throws {
         let toList = clean(to)
         let ccList = clean(cc)
         let bccList = clean(bcc)
@@ -77,6 +84,15 @@ enum MailSender {
             ? ""
             : "try\n            set sender to \"\(escape(from))\"\n        end try"
 
+        // 存草稿时不弹窗口，直接落进「邮件」的草稿箱
+        let visible = delivery == .saveDraft ? "false" : "true"
+        let tail: String
+        switch delivery {
+        case .openWindow: tail = ""
+        case .sendNow: tail = "send newMessage"
+        case .saveDraft: tail = "save newMessage"
+        }
+
         let script = """
         set bodyFile to POSIX file "\(bodyURL.path)"
         set subjFile to POSIX file "\(subjectURL.path)"
@@ -84,15 +100,15 @@ enum MailSender {
         set theSubject to read subjFile as «class utf8»
 
         tell application "Mail"
-            set newMessage to make new outgoing message with properties {subject:theSubject, content:theBody, visible:true}
+            set newMessage to make new outgoing message with properties {subject:theSubject, content:theBody, visible:\(visible)}
             tell newMessage
                 \(senderLine)
                 \(lines(toList, "to"))
                 \(lines(ccList, "cc"))
                 \(lines(bccList, "bcc"))
             end tell
-            activate
-            \(sendNow ? "send newMessage" : "")
+            \(delivery == .openWindow ? "activate" : "")
+            \(tail)
         end tell
         """
 

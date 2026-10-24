@@ -207,7 +207,8 @@ struct ComposeView: View {
                 try await Task.detached(priority: .userInitiated) {
                     try MailSender.compose(
                         from: from, to: to, cc: cc, bcc: bcc,
-                        subject: subject, body: body, sendNow: sendNow
+                        subject: subject, body: body,
+                        delivery: sendNow ? .sendNow : .openWindow
                     )
                 }.value
                 form.sending = false
