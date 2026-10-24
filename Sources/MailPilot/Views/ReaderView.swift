@@ -104,6 +104,42 @@ struct ReaderView: View {
                         }
                     }
 
+                    if !message.recipients.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text("收件人")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.tertiary)
+
+                            Text(message.recipients.joined(separator: "、"))
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                                .help(message.recipients.joined(separator: "\n"))
+
+                            if message.recipients.count > 1 {
+                                Text("共 \(message.recipients.count) 人")
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+
+                            Button {
+                                copyToPasteboard(message.recipients.joined(separator: ", "))
+                                model.showToast("已复制收件人")
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("复制收件人")
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.top, 5)
+                    }
+
                     HStack(spacing: 6) {
                         if message.needsReply { Chip(text: "待回复") }
                         if message.flagged { Chip(text: "已标记") }

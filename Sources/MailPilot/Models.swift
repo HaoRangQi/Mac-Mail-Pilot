@@ -42,6 +42,8 @@ struct Message: Identifiable, Hashable {
     var subject: String
     var sender: String
     var senderEmail: String
+    /// 收件人邮箱列表（To 头）。多账户下要能看出这封信是发给哪个地址的
+    var recipients: [String] = []
     var date: Date
     var preview: String
     var body: String

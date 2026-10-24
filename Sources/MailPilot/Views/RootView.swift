@@ -202,11 +202,11 @@ struct TopBar: View {
         .padding(.horizontal, 12)
         .frame(height: 32)
         .frame(width: 300)
-        .glassEffect(.regular.tint(Theme.moss.opacity(searchFocused ? 0.42 : 0.26)), in: .capsule)
+        .glassEffect(.regular, in: .capsule)
         .overlay(
             Capsule().stroke(
-                Theme.moss.opacity(searchFocused ? 0.55 : 0.20),
-                lineWidth: searchFocused ? 1 : 0.8
+                Theme.moss.opacity(searchFocused ? 0.85 : 0.40),
+                lineWidth: searchFocused ? 1.4 : 1
             )
         )
         .animation(.easeOut(duration: 0.15), value: searchFocused)
