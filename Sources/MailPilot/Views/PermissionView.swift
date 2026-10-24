@@ -4,6 +4,9 @@ final class PermissionForm: ObservableObject {
     @Published var busy = false
     @Published var hint: String?
     @Published var failed = false
+    @Published var automationBusy = false
+    @Published var automation: MailAutomation.Status = .notDetermined
+    @Published var automationHint: String?
 }
 
 struct PermissionView: View {
@@ -23,6 +26,7 @@ struct PermissionView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 statusCard
+                automationCard
                 explainCard
                 actionRow
                 footnote
@@ -30,6 +34,9 @@ struct PermissionView: View {
             .padding(22)
         }
         .scrollIndicators(.visible)
+        .task {
+            form.automation = await MailAutomation.probe()
+        }
     }
 
     // MARK: - 状态
@@ -71,6 +78,112 @@ struct PermissionView: View {
             return "需要在系统设置里把 MailPilot 加入「完全磁盘访问权限」。"
         case .noMailData:
             return "本机没有找到「邮件」App 的数据目录。"
+        }
+    }
+
+    // MARK: - 控制「邮件」的自动化权限
+
+    private var automationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: automationIcon)
+                    .font(.system(size: 22))
+                    .foregroundStyle(automationColor)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        automationColor.opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 11)
+                    )
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("控制「邮件」App")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(automationDetail)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 10) {
+                if !form.automation.isAuthorized {
+                    Button(form.automationBusy ? "等待系统确认…" : "申请权限") {
+                        requestAutomation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(form.automationBusy)
+                }
+                Button("打开自动化设置") { MailAutomation.openAutomationSettings() }
+                    .buttonStyle(.bordered)
+                Spacer()
+            }
+
+            if let hint = form.automationHint {
+                Text(hint)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var automationIcon: String {
+        switch form.automation {
+        case .authorized: return "checkmark.shield.fill"
+        case .denied: return "xmark.shield.fill"
+        case .notDetermined: return "questionmark.circle.fill"
+        case .mailNotRunning: return "moon.zzz.fill"
+        case .failed: return "exclamationmark.shield.fill"
+        }
+    }
+
+    private var automationColor: Color {
+        switch form.automation {
+        case .authorized: return .green
+        case .denied, .failed: return .red
+        case .notDetermined: return .orange
+        case .mailNotRunning: return .secondary
+        }
+    }
+
+    private var automationDetail: String {
+        switch form.automation {
+        case .authorized:
+            return "已授权。删除邮件时「邮件」App 会直接执行，不再弹框。"
+        case .denied:
+            return "上次选择了「不允许」。需要到 系统设置 → 隐私与安全性 → 自动化 手动打开。"
+        case .notDetermined:
+            return "删除与发送邮件需要这项权限，由 macOS 单独管理，无法与磁盘访问一起授予。"
+        case .mailNotRunning:
+            return "「邮件」当前没运行，系统无法弹出确认框。点「申请权限」会自动打开它。"
+        case .failed(let code):
+            return "查询失败（错误码 \(code)）。"
+        }
+    }
+
+    private func requestAutomation() {
+        Task { @MainActor in
+            form.automationBusy = true
+            form.automationHint = nil
+            let result = await MailAutomation.request()
+            form.automationBusy = false
+            form.automation = result
+            switch result {
+            case .authorized:
+                form.automationHint = "已授权，之后删除邮件不会再弹框。"
+            case .denied:
+                form.automationHint = "你选择了「不允许」。可到 系统设置 → 隐私与安全性 → 自动化 里把 MailPilot → 邮件 打开。"
+            case .notDetermined:
+                form.automationHint = "系统没有弹出确认框。稍后再试一次，或到自动化设置里手动添加。"
+            case .mailNotRunning:
+                form.automationHint = "「邮件」没有启动，无法询问。请先打开「邮件」App 再试。"
+            case .failed(let code):
+                form.automationHint = "询问失败（错误码 \(code)）。"
+            }
         }
     }
 

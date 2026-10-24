@@ -2,6 +2,18 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.4] - 2026-10-24
+
+### 新增
+
+- **权限管理新增「控制「邮件」App」卡片**：实时显示自动化权限状态（已授权 / 已被拒绝 / 尚未询问 / 「邮件」未运行），点「申请权限」主动触发系统授权框，另附「打开自动化设置」直达系统设置。弹框时机从「点删除那一刻」提前到设置页，且状态随时可见
+- `MailAutomation`（`MailAccess.swift`）：封装 TCC 自动化权限（`kTCCServiceAppleEvents`）的查询与主动申请，底层用 `AEDeterminePermissionToAutomateTarget(..., askUserIfNeeded: true)`；申请前自动拉起「邮件」App（目标未运行时不弹框，只返回 `procNotFound`）
+
+### 修复
+
+- 删除时系统弹框显示「“终端.app”想要控制“邮件.app”」而非 MailPilot：根因是从终端 `open` 启动 App 时，TCC 把**责任进程**判定为 Terminal，授权也记在终端名下。`run.sh` 增加提示，建议改用访达双击启动以让授权归属 MailPilot
+- 删除失败时的提示改为指向「设置 → 权限管理 → 申请权限」，不再让用户去系统设置里找自动化列表
+
 ## [0.2.3] - 2026-10-24
 
 ### 新增

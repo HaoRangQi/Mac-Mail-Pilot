@@ -104,7 +104,7 @@ enum MailMutator {
                     let message = (errorInfo[NSAppleScript.errorMessage] as? String) ?? "脚本执行失败"
                     if number == -1743 {
                         continuation.resume(throwing: MailMutatorError.script(
-                            "未授权控制「邮件」。请到 系统设置 → 隐私与安全性 → 自动化 中勾选 MailPilot"))
+                            "未授权控制「邮件」。到 设置 → 权限管理 → 控制「邮件」App 点「申请权限」即可"))
                     } else {
                         continuation.resume(throwing: MailMutatorError.script(message))
                     }
