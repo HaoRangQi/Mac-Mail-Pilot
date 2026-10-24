@@ -333,19 +333,48 @@ enum EmlxParser {
         return (trimmed, trimmed)
     }
 
+    /// 解析 Date 头。邮件日期写法五花八门（带 `(CST)` 注释、只有 GMT、无时区、单数字日…），
+    /// 任何一条不匹配就会让日期落到兜底值——之前兜底是 `.distantPast`，界面上显示成「1年1月1日」。
     private static func parseDate(_ raw: String) -> Date? {
-        guard !raw.isEmpty else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // 去掉尾部时区注释，如 " (CST)" / " (UTC)" / " (GMT+08:00)"
+        var cleaned = trimmed
+        if let range = cleaned.range(of: "\\s*\\([^)]*\\)\\s*$", options: .regularExpression) {
+            cleaned.removeSubrange(range)
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
         let formats = [
             "EEE, d MMM yyyy HH:mm:ss Z",
-            "d MMM yyyy HH:mm:ss Z",
             "EEE, d MMM yyyy HH:mm Z",
+            "EEE, d MMMM yyyy HH:mm:ss Z",
+            "d MMM yyyy HH:mm:ss Z",
+            "d MMM yyyy HH:mm Z",
+            "d MMMM yyyy HH:mm:ss Z",
             "yyyy-MM-dd HH:mm:ss Z",
+            "EEE, d MMM yyyy HH:mm:ss zzz",
+            "d MMM yyyy HH:mm:ss zzz",
+            "EEE, d MMM yyyy HH:mm:ss",
+            "d MMM yyyy HH:mm:ss",
         ]
-        for format in formats {
-            let formatter = DateFormatter()
-            formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.dateFormat = format
-            if let date = formatter.date(from: raw) { return date }
+        for candidate in [cleaned, trimmed] where !candidate.isEmpty {
+            for format in formats {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = .current
+                formatter.dateFormat = format
+                if let date = formatter.date(from: candidate) { return date }
+            }
+        }
+
+        // 兜底：交给系统日期识别，能处理各种非标准写法
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue) {
+            let range = NSRange(trimmed.startIndex..., in: trimmed)
+            if let match = detector.firstMatch(in: trimmed, range: range), let date = match.date {
+                return date
+            }
         }
         return nil
     }

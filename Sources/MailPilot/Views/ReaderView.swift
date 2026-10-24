@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ReaderView: View {
@@ -48,20 +49,59 @@ struct ReaderView: View {
                     Text(message.subject)
                         .font(.system(size: 19, weight: .semibold))
                         .lineSpacing(2)
-                        .padding(.bottom, 8)
+                        .textSelection(.enabled)
+                        .padding(.bottom, 10)
 
-                    HStack(spacing: 7) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(message.displaySender)
-                            .font(.system(size: 12.5, weight: .medium))
+                            .font(.system(size: 13.5, weight: .semibold))
+                            .foregroundStyle(.primary)
+                            .textSelection(.enabled)
+
                         if !message.senderEmail.isEmpty {
-                            Text("<\(message.senderEmail)>")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(.tertiary)
+                            Text(message.senderEmail)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+
+                            Button {
+                                copyToPasteboard(message.senderEmail)
+                                model.showToast("已复制邮箱地址")
+                            } label: {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 9.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("复制发件人邮箱")
                         }
-                        Spacer()
-                        Text(message.date.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
+
+                        Spacer(minLength: 10)
+
+                        Text(dateText(message.date))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .contextMenu {
+                        Button("复制发件人") {
+                            copyToPasteboard(message.displaySender)
+                            model.showToast("已复制发件人")
+                        }
+                        Button("复制邮箱地址") {
+                            copyToPasteboard(message.senderEmail)
+                            model.showToast("已复制邮箱地址")
+                        }
+                        Button("复制主题") {
+                            copyToPasteboard(message.subject)
+                            model.showToast("已复制主题")
+                        }
+                        Divider()
+                        Button("复制邮件全文") {
+                            let header = "\(message.subject)\n\(message.displaySender) <\(message.senderEmail)>\n\(dateText(message.date))\n\n"
+                            copyToPasteboard(header + message.body)
+                            model.showToast("已复制邮件全文")
+                        }
                     }
 
                     HStack(spacing: 6) {
@@ -205,5 +245,20 @@ struct ReaderView: View {
         .background(Color.primary.opacity(0.05), in: Capsule())
         .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
         .disabled(model.selected == nil)
+    }
+
+    // MARK: - 复制与日期
+
+    private func copyToPasteboard(_ text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
+    }
+
+    /// 完整日期。解析失败的旧数据可能落在 1970 之前，明确写「日期未知」而不是显示「1年1月1日」
+    private func dateText(_ date: Date) -> String {
+        guard date.timeIntervalSince1970 > 0 else { return "日期未知" }
+        return date.formatted(.dateTime.year().month().day().hour().minute())
     }
 }

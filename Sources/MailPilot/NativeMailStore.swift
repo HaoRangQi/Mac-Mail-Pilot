@@ -430,6 +430,10 @@ final class NativeMailStore: MailStore {
     private func makeMessage(url: URL, mailbox: Mailbox, includeBody: Bool) -> Message? {
         guard let parsed = EmlxParser.parse(url: url, includeBody: includeBody) else { return nil }
         let rel = relativePath(url)
+        // Date 头解析不出来时退回 .emlx 的文件修改时间（接近收信时间）。
+        // 绝不能用 .distantPast——那是公元 1 年，界面上会显示「1年1月1日」
+        let fallbackDate = (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+            .contentModificationDate) ?? Date()
         return Message(
             id: "native:" + rel,
             accountID: mailbox.accountID,
@@ -437,7 +441,7 @@ final class NativeMailStore: MailStore {
             subject: parsed.subject,
             sender: parsed.senderName,
             senderEmail: parsed.senderEmail,
-            date: parsed.date ?? .distantPast,
+            date: parsed.date ?? fallbackDate,
             preview: String(parsed.body.prefix(120)),
             body: parsed.body,
             unread: false,

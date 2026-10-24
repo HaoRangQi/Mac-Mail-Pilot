@@ -86,6 +86,8 @@ struct MessageListView: View {
     }
 
     static func dateText(_ date: Date) -> String {
+        // 解析失败的历史数据可能落在 1970 之前，别显示成「1/1/1」
+        guard date.timeIntervalSince1970 > 0 else { return "—" }
         let cal = Calendar.current
         let f = DateFormatter()
         if cal.isDateInToday(date) {
