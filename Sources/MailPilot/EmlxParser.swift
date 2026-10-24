@@ -8,6 +8,8 @@ enum EmlxParser {
         var senderName = ""
         var senderEmail = ""
         var to: [String] = []
+        var cc: [String] = []
+        var bcc: [String] = []
         var date: Date?
         var body = ""
         var hasAttachments = false
@@ -41,10 +43,9 @@ enum EmlxParser {
         let from = decodeHeader(headers["from"] ?? "")
         (parsed.senderName, parsed.senderEmail) = splitAddress(from)
 
-        parsed.to = (headers["to"] ?? "")
-            .components(separatedBy: ",")
-            .map { splitAddress(decodeHeader($0)).1 }
-            .filter { !$0.isEmpty }
+        parsed.to = addressList(headers["to"] ?? "")
+        parsed.cc = addressList(headers["cc"] ?? "")
+        parsed.bcc = addressList(headers["bcc"] ?? "")
         parsed.date = parseDate(headers["date"] ?? "")
         parsed.messageID = (headers["message-id"] ?? "").trimmingCharacters(in: .whitespaces)
         parsed.deliveredTo = (headers["delivered-to"] ?? headers["x-original-to"] ?? "")
@@ -331,6 +332,44 @@ enum EmlxParser {
         }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         return (trimmed, trimmed)
+    }
+
+    /// 解析 To / Cc / Bcc 的地址列表。
+    ///
+    /// 不能简单按逗号 split：显示名里可能带逗号（`"Doe, John" <j@x.com>`），
+    /// 直接切会把它拆成两半。这里按「引号内 / 尖括号内」的层级判断，只在顶层逗号处分隔。
+    private static func addressList(_ raw: String) -> [String] {
+        guard !raw.isEmpty else { return [] }
+        let decoded = decodeHeader(raw)
+
+        var parts: [String] = []
+        var current = ""
+        var angleDepth = 0
+        var inQuote = false
+
+        for ch in decoded {
+            switch ch {
+            case "\"":
+                inQuote.toggle()
+                current.append(ch)
+            case "<" where !inQuote:
+                angleDepth += 1
+                current.append(ch)
+            case ">" where !inQuote:
+                angleDepth = max(0, angleDepth - 1)
+                current.append(ch)
+            case "," where !inQuote && angleDepth == 0:
+                parts.append(current)
+                current = ""
+            default:
+                current.append(ch)
+            }
+        }
+        parts.append(current)
+
+        return parts
+            .map { splitAddress($0.trimmingCharacters(in: .whitespacesAndNewlines)).1 }
+            .filter { $0.contains("@") }
     }
 
     /// 解析 Date 头。邮件日期写法五花八门（带 `(CST)` 注释、只有 GMT、无时区、单数字日…），

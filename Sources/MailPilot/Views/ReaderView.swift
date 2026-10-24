@@ -104,41 +104,9 @@ struct ReaderView: View {
                         }
                     }
 
-                    if !message.recipients.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("收件人")
-                                .font(.system(size: 10.5))
-                                .foregroundStyle(.tertiary)
-
-                            Text(message.recipients.joined(separator: "、"))
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
-                                .help(message.recipients.joined(separator: "\n"))
-
-                            if message.recipients.count > 1 {
-                                Text("共 \(message.recipients.count) 人")
-                                    .font(.system(size: 10.5))
-                                    .foregroundStyle(.tertiary)
-                            }
-
-                            Button {
-                                copyToPasteboard(message.recipients.joined(separator: ", "))
-                                model.showToast("已复制收件人")
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 9.5))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("复制收件人")
-
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.top, 5)
-                    }
+                    addressRow("收件人", message.recipients)
+                    addressRow("抄送", message.cc)
+                    addressRow("密送", message.bcc)
 
                     HStack(spacing: 6) {
                         if message.needsReply { Chip(text: "待回复") }
@@ -284,6 +252,47 @@ struct ReaderView: View {
     }
 
     // MARK: - 复制与日期
+
+    /// 收件人 / 抄送 / 密送 统一行：标签固定宽度让三行对齐，空列表整行不渲染
+    @ViewBuilder
+    private func addressRow(_ label: String, _ addresses: [String]) -> some View {
+        if !addresses.isEmpty {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(label)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 34, alignment: .leading)
+
+                Text(addresses.joined(separator: "、"))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .help(addresses.joined(separator: "\n"))
+
+                if addresses.count > 1 {
+                    Text("共 \(addresses.count) 人")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+
+                Button {
+                    copyToPasteboard(addresses.joined(separator: ", "))
+                    model.showToast("已复制\(label)")
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("复制\(label)")
+
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 4)
+        }
+    }
 
     private func copyToPasteboard(_ text: String) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)

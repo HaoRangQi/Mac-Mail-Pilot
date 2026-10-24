@@ -442,6 +442,8 @@ final class NativeMailStore: MailStore {
             sender: parsed.senderName,
             senderEmail: parsed.senderEmail,
             recipients: parsed.to,
+            cc: parsed.cc,
+            bcc: parsed.bcc,
             date: parsed.date ?? fallbackDate,
             preview: String(parsed.body.prefix(120)),
             body: parsed.body,
