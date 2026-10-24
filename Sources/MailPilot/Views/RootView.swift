@@ -17,7 +17,11 @@ struct RootView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .padding(Theme.gap + 2)
+            // 顶部只留 2pt：上面已经是系统给红绿灯预留的 title bar 安全区，
+            // 再加 12pt padding 会让顶栏和标题栏之间空出一条明显的白带
+            .padding(.horizontal, Theme.gap + 2)
+            .padding(.top, 2)
+            .padding(.bottom, Theme.gap + 2)
         }
         .frame(minWidth: 1000, minHeight: 640)
         .overlay(alignment: .top) {
@@ -176,7 +180,7 @@ struct TopBar: View {
 
             searchField
         }
-        .frame(height: 36)
+        .frame(height: 34)
     }
 
     /// 当前模型指示器 + 快速切换。用户要随时知道「现在是谁在干活」

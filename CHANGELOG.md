@@ -2,6 +2,12 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.20] - 2026-10-24
+
+### 变更
+
+- **压缩顶栏上方留白**：`RootView` 顶部 padding 12pt → 2pt，顶栏高度 36 → 34。窗口用 `hiddenTitleBar`，红绿灯所在的 title bar 安全区已经占了约 15pt，再叠 12pt padding 就在顶栏上方空出一条明显白带
+
 ## [0.2.19] - 2026-10-24
 
 ### 新增
