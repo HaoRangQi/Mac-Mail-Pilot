@@ -2,6 +2,13 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.8] - 2026-10-24
+
+### 修复
+
+- **删除报「找不到这封邮件」但邮件确实在**：`Mail.app` 的 `message id` 属性有时不带尖括号，而 RFC 2822 头里是 `<id@host>`，用 `is` 精确比较会永远匹配不上。现在同时构造裸 id 与带尖括号 id，用 `whose (message id is bareId or message id is angleId)` 双格式匹配，账户内查找与全库兜底都改用它
+- 找不到时返回**样本 Message-ID**：取该账户第一个非空邮箱里第一封邮件的真实 `message id`，随错误信息一起显示。一眼就能判断是「格式差异」还是「邮件根本不在 Mail 的索引里」
+
 ## [0.2.7] - 2026-10-24
 
 ### 修复

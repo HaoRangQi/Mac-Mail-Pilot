@@ -37,9 +37,15 @@ enum MailMutator {
                             accountEmail: String,
                             mailboxName: String,
                             messageID: String) async throws {
+        // 「邮件」App 的 `message id` 属性通常不带尖括号，而 RFC 2822 头里是 <id@host>。
+        // 两边都试一遍，避免格式差异导致永远匹配不到。
+        let bare = messageID.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
+        guard !bare.isEmpty else { throw MailMutatorError.missingMessageID }
+
         let script = """
         tell application "Mail"
-            set theMsgId to "\(escape(messageID))"
+            set bareId to "\(escape(bare))"
+            set angleId to "<" & bareId & ">"
             set acctIdx to 0
 
             -- 1. 按账户 id（通常是 Mail 目录的 UUID）匹配，最精确
@@ -88,14 +94,14 @@ enum MailMutator {
             if acctIdx > 0 then
                 set acct to account acctIdx
                 try
-                    set m to first message of mailbox "\(escape(mailboxName))" of acct whose message id is theMsgId
+                    set m to first message of mailbox "\(escape(mailboxName))" of acct whose (message id is bareId or message id is angleId)
                 end try
                 if m is missing value then
                     repeat with j from 1 to (count of mailboxes of acct)
                         try
                             -- 跳过空邮箱：Mail 给每个账户都建了草稿/任务/便笺/日记等空目录
                             if (count of messages of mailbox j of acct) > 0 then
-                                set m to first message of mailbox j of acct whose message id is theMsgId
+                                set m to first message of mailbox j of acct whose (message id is bareId or message id is angleId)
                             end if
                         end try
                         if m is not missing value then exit repeat
@@ -110,7 +116,7 @@ enum MailMutator {
                     repeat with j from 1 to (count of mailboxes of a2)
                         try
                             if (count of messages of mailbox j of a2) > 0 then
-                                set m to first message of mailbox j of a2 whose message id is theMsgId
+                                set m to first message of mailbox j of a2 whose (message id is bareId or message id is angleId)
                             end if
                         end try
                         if m is not missing value then exit repeat
@@ -122,7 +128,20 @@ enum MailMutator {
             set acctFound to "失败"
             if acctIdx > 0 then set acctFound to "成功"
             if m is missing value then
-                return "ERROR: 在「邮件」App 里找不到这封邮件（账户定位" & acctFound & "），可能已被移动或删除"
+                -- 取一个真实样本 ID，便于判断是不是格式差异（带不带尖括号）
+                set sampleId to "（无样本）"
+                if acctIdx > 0 then
+                    set acct to account acctIdx
+                    repeat with j from 1 to (count of mailboxes of acct)
+                        try
+                            if (count of messages of mailbox j of acct) > 0 then
+                                set sampleId to (message id of message 1 of mailbox j of acct) as string
+                                exit repeat
+                            end if
+                        end try
+                    end repeat
+                end if
+                return "ERROR: 找不到 Message-ID " & bareId & "（账户定位" & acctFound & "；样本 " & sampleId & "）"
             end if
 
             try
