@@ -72,6 +72,7 @@ struct RootView: View {
 
 struct TopBar: View {
     @EnvironmentObject private var model: AppModel
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -180,10 +181,11 @@ struct TopBar: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(searchFocused ? Theme.moss : Color.secondary)
             TextField("搜索邮件", text: $model.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
+                .focused($searchFocused)
                 .onChange(of: model.query) { _, _ in model.scheduleSearch() }
             if !model.query.isEmpty {
                 Button {
@@ -200,6 +202,13 @@ struct TopBar: View {
         .padding(.horizontal, 12)
         .frame(height: 32)
         .frame(width: 300)
-        .glassEffect(.regular, in: .capsule)
+        .glassEffect(.regular.tint(Theme.moss.opacity(searchFocused ? 0.42 : 0.26)), in: .capsule)
+        .overlay(
+            Capsule().stroke(
+                Theme.moss.opacity(searchFocused ? 0.55 : 0.20),
+                lineWidth: searchFocused ? 1 : 0.8
+            )
+        )
+        .animation(.easeOut(duration: 0.15), value: searchFocused)
     }
 }
