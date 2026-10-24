@@ -128,11 +128,18 @@ enum EmlxParser {
                     htmlFallback = decodeSingle(headers: parsed, body: partBody)
                 }
             }
-            return htmlFallback.isEmpty ? "" : stripHTML(htmlFallback)
+            return readableText(fromHTML: htmlFallback)
         }
 
         let text = decodeSingle(headers: headers, body: body)
-        return lower.contains("text/html") ? stripHTML(text) : text
+        return lower.contains("text/html") ? readableText(fromHTML: text) : text
+    }
+
+    /// HTML 剥离后可能只剩空白（例如纯 CSS 排版通知），给一句明确提示而不是留白
+    private static func readableText(fromHTML html: String) -> String {
+        guard !html.isEmpty else { return "" }
+        let stripped = stripHTML(html)
+        return stripped.isEmpty ? "（这封邮件没有可显示的正文）" : stripped
     }
 
     private static func decodeSingle(headers: [String: String], body: String) -> String {
@@ -189,17 +196,74 @@ enum EmlxParser {
         return Data(output)
     }
 
+    /// HTML → 纯文本。
+    ///
+    /// 关键：必须**整块**移除 `<style>` / `<script>` / `<head>` / 注释，
+    /// 因为这些标签内部的 CSS / JS 文本不是标签，单纯剥 `<...>` 会把它们当正文留下，
+    /// 正文里就会冒出 `html { -webkit-text-size-adjust:none; }` 这种 CSS 源码。
     private static func stripHTML(_ html: String) -> String {
         var text = html
+
+        // 1. 整块移除不可见内容
+        for pattern in [
+            "(?is)<style[^>]*>.*?</style>",
+            "(?is)<script[^>]*>.*?</script>",
+            "(?is)<head[^>]*>.*?</head>",
+            "(?is)<title[^>]*>.*?</title>",
+            "(?is)<!--.*?-->",
+        ] {
+            text = text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
+        }
+
+        // 2. 块级结构 → 换行，保留可读的分段
         text = text.replacingOccurrences(of: "(?i)<br\\s*/?>", with: "\n", options: .regularExpression)
-        text = text.replacingOccurrences(of: "(?i)</p>", with: "\n\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?i)<li[^>]*>", with: "\n· ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "(?i)<hr[^>]*>", with: "\n———\n", options: .regularExpression)
+        text = text.replacingOccurrences(
+            of: "(?i)</?(p|div|tr|td|li|h[1-6]|blockquote|table|section|article|ul|ol|header|footer)[^>]*>",
+            with: "\n",
+            options: .regularExpression
+        )
+
+        // 3. 剥掉剩余标签
         text = text.replacingOccurrences(of: "(?i)<[^>]+>", with: "", options: .regularExpression)
-        let entities = ["&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"", "&#39;": "'"]
-        for (key, value) in entities {
+
+        // 4. 实体解码
+        text = decodeEntities(text)
+
+        // 5. 收拾空白：行内多余空格、行首尾空格、连续空行
+        text = text.replacingOccurrences(of: "[ \\t\\u{00A0}]+", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: " *\n *", with: "\n", options: .regularExpression)
+        text = text.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func decodeEntities(_ input: String) -> String {
+        var text = input
+        let named = [
+            "&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+            "&apos;": "'", "&mdash;": "—", "&ndash;": "–", "&hellip;": "…",
+            "&rsquo;": "’", "&lsquo;": "‘", "&ldquo;": "“", "&rdquo;": "”",
+            "&middot;": "·", "&bull;": "•", "&copy;": "©", "&reg;": "®",
+            "&trade;": "™", "&times;": "×", "&laquo;": "«", "&raquo;": "»",
+        ]
+        for (key, value) in named {
             text = text.replacingOccurrences(of: key, with: value)
         }
-        return text.replacingOccurrences(of: "\n{3,}", with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // 数字实体 &#123; 与 &#x1F600;
+        for (pattern, radix) in [("&#(\\d+);", 10), ("&#[xX]([0-9A-Fa-f]+);", 16)] {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            for match in matches.reversed() {
+                guard let full = Range(match.range, in: text),
+                      let numberRange = Range(match.range(at: 1), in: text),
+                      let code = UInt32(text[numberRange], radix: radix),
+                      let scalar = Unicode.Scalar(code) else { continue }
+                text.replaceSubrange(full, with: String(Character(scalar)))
+            }
+        }
+        return text
     }
 
     // MARK: - 头部解码

@@ -73,11 +73,17 @@ struct ReaderView: View {
 
                     Divider().opacity(0.5).padding(.vertical, 14)
 
-                    Text(message.body)
-                        .font(.system(size: 13.5))
-                        .lineSpacing(5)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("（这封邮件没有正文）")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text(message.body)
+                            .font(.system(size: 13.5))
+                            .lineSpacing(6)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: 760, alignment: .leading)
+                    }
 
                     if !message.attachments.isEmpty {
                         HStack(spacing: 7) {
