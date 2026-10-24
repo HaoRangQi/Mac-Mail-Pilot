@@ -358,8 +358,15 @@ struct AskBar: View {
 
     // MARK: - 输入
 
-    private var inputRow: some View {
-        HStack(spacing: 9) {
+    /// 走带工具的问答：AI 可以调 searchMessages / getMessage / listMailboxes 查邮件
+    private func submit() {
+        let text = model.askText
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        model.askText = ""
+        Task { await model.askWithTools(text) }
+    }
+
+    private var inputRow: some View {        HStack(spacing: 9) {
             Image(systemName: "sparkles")
                 .font(.system(size: 13.5, weight: .medium))
                 .foregroundStyle(border)
@@ -368,13 +375,13 @@ struct AskBar: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($focused)
-                .onSubmit { model.ask() }
+                .onSubmit { submit() }
 
             if model.askBusy {
                 ProgressView().controlSize(.mini)
             } else if !model.askText.isEmpty {
                 Button {
-                    model.ask()
+                    submit()
                 } label: {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.system(size: 15))

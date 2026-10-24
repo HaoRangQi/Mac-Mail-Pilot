@@ -634,6 +634,126 @@ final class AppModel: ObservableObject {    // 数据
         }
     }
 
+    // MARK: - 工具调用（AI 操作邮件）
+
+    /// 待用户确认的工具调用（破坏性操作）
+    @Published var pendingToolCall: ToolCall?
+
+    /// 当前模型能否使用某工具。
+    /// 只读任何模型可用；写入与破坏性一律先确认——「AI 只找不删」的边界在这里守住。
+    func toolPermission(_ tool: MailTool) -> (allowed: Bool, needsConfirm: Bool) {
+        switch tool.risk {
+        case .read:
+            return (true, false)
+        case .write, .destructive:
+            return (true, true)
+        }
+    }
+
+    /// 执行一次工具调用，返回给模型看的文本结果
+    func executeToolCall(_ call: ToolCall) async -> String {
+        switch call.tool {
+        case .searchMessages:
+            let query = (call.arguments["query"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else { return "搜索词为空" }
+            let hits = (try? await store.search(query, limit: 10)) ?? []
+            guard !hits.isEmpty else { return "没有找到匹配「\(query)」的邮件" }
+            return hits.map { m in
+                """
+                - id: \(m.id)
+                  主题: \(m.subject)
+                  发件人: \(m.displaySender) <\(m.senderEmail)>
+                  日期: \(m.date.formatted(date: .abbreviated, time: .shortened))
+                  摘要: \(m.preview)
+                """
+            }.joined(separator: "\n")
+
+        case .getMessage:
+            let id = call.arguments["message_id"] as? String ?? ""
+            guard let message = try? await store.message(id: id) else {
+                return "找不到 ID 为 \(id) 的邮件"
+            }
+            return """
+            主题: \(message.subject)
+            发件人: \(message.displaySender) <\(message.senderEmail)>
+            日期: \(message.date.formatted())
+            正文:
+            \(message.body.prefix(3000))
+            """
+
+        case .listMailboxes:
+            let grouped = Dictionary(grouping: mailboxes) { $0.accountID }
+            var lines: [String] = []
+            for account in accounts {
+                let boxes = grouped[account.id] ?? []
+                guard !boxes.isEmpty else { continue }
+                lines.append("\(account.name)（\(account.email.isEmpty ? "无邮箱地址" : account.email)）")
+                for box in boxes {
+                    lines.append("  - \(box.name)：\(box.total) 封")
+                }
+            }
+            return lines.isEmpty ? "没有邮箱" : lines.joined(separator: "\n")
+
+        case .moveToTrash:
+            let id = call.arguments["message_id"] as? String ?? ""
+            guard let message = try? await store.message(id: id) else {
+                return "找不到 ID 为 \(id) 的邮件"
+            }
+            // 破坏性操作：必须用户点过确认才会走到这里
+            do {
+                try await store.moveToTrash(message)
+                await loadMessages()
+                showToast("已移入废纸篓：\(message.subject)")
+                return "已移入废纸篓：\(message.subject)"
+            } catch {
+                return "删除失败：\(error.localizedDescription)"
+            }
+
+        case .markRead, .setFlag, .saveDraft, .sendMessage:
+            return "工具「\(call.tool.rawValue)」尚未开放。标记已读、旗标、存草稿、发送请在界面上手动完成。"
+        }
+    }
+
+    /// 带工具的问答入口
+    func askWithTools(_ question: String) async {
+        let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+
+        guard let provider = ai.activeProvider else {
+            errorMessage = "还没有配置模型。点右上角齿轮接入后才能使用问答。"
+            return
+        }
+
+        askBusy = true
+        defer { askBusy = false }
+
+        let system = """
+        你是 MailPilot 的邮件助理。你可以调用工具查询用户的邮件并回答问题。
+
+        规则：
+        - 需要邮件信息时，先 searchMessages 拿 ID，再 getMessage 读正文
+        - 回答用简体中文，直接、具体，不要客套
+        - 不知道就说不知道，不要编造邮件内容
+        - 涉及删除、发送等破坏性操作，明确告诉用户需要他本人确认，不要声称已经执行
+        """
+
+        do {
+            let answer = try await AIService.chatWithTools(
+                provider: provider,
+                model: provider.selectedModel,
+                system: system,
+                user: text,
+                tools: MailTool.allCases.map { $0.toolSchema }
+            ) { call in
+                await self.executeToolCall(call)
+            }
+            appendAsk(question: text, answer: answer)
+        } catch {
+            errorMessage = "调用失败：\(error.localizedDescription)"
+        }
+    }
+
     // MARK: - AI 结果交付（作为当前邮件的回复）
 
     /// 进入回复草稿的编辑态

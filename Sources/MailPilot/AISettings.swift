@@ -383,6 +383,106 @@ enum AIService {
         throw lastError
     }
 
+    // MARK: - 带工具调用的对话
+
+    /// 支持 tool calling 的对话。
+    ///
+    /// 循环：发出请求 → 模型若要调工具就交给 `execute` 执行 → 结果回传 → 再请求，
+    /// 直到模型给出最终文本或达到轮数上限。`maxRounds` 防止模型无限调工具。
+    ///
+    /// 目前只实现 OpenAI 兼容协议（`.openai` 与 `.ollama`），Anthropic 的 tools 格式不同，后续再加。
+    static func chatWithTools(provider: AIProvider,
+                              model: String,
+                              system: String,
+                              user: String,
+                              tools: [[String: Any]],
+                              maxRounds: Int = 4,
+                              execute: @escaping (ToolCall) async throws -> String) async throws -> String {
+        guard provider.enabled, !model.isEmpty else { throw AIError.notConfigured }
+
+        let keys = keyCandidates(provider)
+        guard !keys.isEmpty else { throw AIError.noKey }
+
+        let spec = chatPath(provider.kind)
+        guard let url = endpoint(provider.baseURL, spec.path, needsV1: spec.needsV1) else {
+            throw AIError.notConfigured
+        }
+
+        var messages: [[String: Any]] = [
+            ["role": "system", "content": system],
+            ["role": "user", "content": user],
+        ]
+
+        var lastError: Error = AIError.notConfigured
+        for key in keys {
+            do {
+                for _ in 0..<maxRounds {
+                    var body: [String: Any] = [
+                        "model": model,
+                        "messages": messages,
+                        "temperature": 0.4,
+                        "stream": false,
+                    ]
+                    if !tools.isEmpty { body["tools"] = tools }
+
+                    let data = try await send(url: url, method: "POST",
+                                              headers: authHeaders(provider.kind, key), body: body)
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let choice = (json["choices"] as? [[String: Any]])?.first,
+                          let message = choice["message"] as? [String: Any] else {
+                        throw AIError.empty
+                    }
+
+                    let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
+                    if rawCalls.isEmpty {
+                        guard let content = message["content"] as? String, !content.isEmpty else {
+                            throw AIError.empty
+                        }
+                        return content
+                    }
+
+                    // assistant 的原始消息必须原样回传，OpenAI 协议要求上下文里有这段 tool_calls
+                    messages.append(message)
+
+                    for raw in rawCalls {
+                        let callID = raw["id"] as? String ?? UUID().uuidString
+                        guard let function = raw["function"] as? [String: Any],
+                              let name = function["name"] as? String,
+                              let tool = MailTool(rawValue: name) else {
+                            messages.append(["role": "tool", "tool_call_id": callID,
+                                             "content": "工具不存在或无法解析"])
+                            continue
+                        }
+
+                        var arguments: [String: Any] = [:]
+                        if let argsText = function["arguments"] as? String,
+                           !argsText.isEmpty,
+                           let argsData = argsText.data(using: .utf8),
+                           let parsed = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any] {
+                            arguments = parsed
+                        }
+
+                        let result: String
+                        do {
+                            result = try await execute(ToolCall(id: callID, tool: tool, arguments: arguments))
+                        } catch {
+                            result = "执行失败：\(error.localizedDescription)"
+                        }
+                        messages.append(["role": "tool", "tool_call_id": callID, "content": result])
+                    }
+                }
+                throw AIError.empty   // 轮数用尽，模型还在要工具
+            } catch let error as AIError {
+                if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
+                    lastError = error
+                    continue
+                }
+                throw error
+            }
+        }
+        throw lastError
+    }
+
     // MARK: - 模型列表
 
     static func fetchModels(provider: AIProvider) async throws -> [String] {

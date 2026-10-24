@@ -2,6 +2,23 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.32] - 2026-10-24
+
+### 新增
+
+- **AI 工具调用（tool calling）**：AI 从此能操作邮件，不只是读邮件生成文字
+  - `MailTool` 定义 8 个工具：`searchMessages` / `getMessage` / `listMailboxes` / `markRead` / `setFlag` / `moveToTrash` / `saveDraft` / `sendMessage`，每个都带 OpenAI 兼容的参数 schema 与给模型看的使用说明
+  - 权限分三级：**只读 / 写入 / 破坏性**。只读工具任何模型可用；写入与破坏性一律需要用户确认，守住「AI 只找不删」的边界
+  - `AIService.chatWithTools` 实现 OpenAI 协议的 tool calling 循环：模型请求工具 → 本地执行 → 结果回传 → 再请求，最多 4 轮，防止模型无限调工具。assistant 消息原样回传以符合协议
+  - `AppModel.executeToolCall` 执行并返回文本结果；`askWithTools` 作为问答入口，已接到 ⌘K 问答框
+  - 破坏性说明写进系统提示词：模型不得声称已执行删除/发送，必须告知用户需本人确认
+
+### 已知限制
+
+- 目前只有只读工具真正可用（搜索 / 读正文 / 列邮箱）；`markRead` / `setFlag` / `saveDraft` / `sendMessage` 会返回「尚未开放」，由界面手动完成
+- `moveToTrash` 已接通但尚未开放给模型（确认交互未做完）
+- 仅支持 OpenAI 兼容协议（DeepSeek / Ollama 等），Anthropic 的 tools 格式不同，后续再加
+
 ## [0.2.31] - 2026-10-24
 
 ### 新增
