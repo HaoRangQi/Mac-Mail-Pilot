@@ -271,6 +271,34 @@ struct ReaderView: View {
                         }
                         .foregroundStyle(Theme.gold)
                     }
+
+                    // 命中的敏感信息必须可见，否则用户根本不知道脱敏改了什么
+                    if !model.aiRedactions.isEmpty {
+                        DisclosureGroup {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(model.aiRedactions, id: \.placeholder) { mapping in
+                                    HStack(spacing: 6) {
+                                        Text(mapping.placeholder)
+                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .foregroundStyle(Theme.gold)
+                                        Image(systemName: "arrow.left")
+                                            .font(.system(size: 8))
+                                            .foregroundStyle(.tertiary)
+                                        Text(mapping.original)
+                                            .font(.system(size: 10.5, design: .monospaced))
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                            .padding(9)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7))
+                        } label: {
+                            Text("已脱敏 \(model.aiRedactions.count) 处：\(Redactor.summary(model.aiRedactions))")
+                                .font(.system(size: 10.5))
+                        }
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.gold)
+                    }
                     if model.aiEditing {
                         TextEditor(text: $model.aiDraftText)
                             .font(.system(size: 12.5))
@@ -398,7 +426,7 @@ struct ReaderView: View {
         if request.mappings.isEmpty {
             text += "未脱敏：邮件内容将原样发送"
         } else {
-            text += "已脱敏：\(Redactor.summary(request.mappings))"
+            text += "已脱敏 \(request.mappings.count) 处：\(Redactor.summary(request.mappings))"
         }
         return text
     }

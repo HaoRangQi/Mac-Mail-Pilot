@@ -110,6 +110,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var aiAction: AIAction?
     /// 本次输出是否来自可信模型。false 时界面要明确标注数据已外发给不可信服务商
     @Published var aiOutputTrusted = true
+    /// 本次输出的脱敏映射，供界面展示「到底把什么替换成了占位符」
+    @Published var aiRedactions: [Redactor.Mapping] = []
     /// 回复草稿的编辑态
     @Published var aiEditing = false
     @Published var aiDraftText = ""
@@ -272,6 +274,7 @@ final class AppModel: ObservableObject {    // 数据
         aiOutput = nil
         aiAction = nil
         aiEditing = false
+        aiRedactions = []
         query = ""
         if showAsk { syncAskScopeToSelection() }
         await loadMessages()
@@ -292,6 +295,7 @@ final class AppModel: ObservableObject {    // 数据
         aiOutput = nil
         aiAction = nil
         aiEditing = false
+        aiRedactions = []
         if message.unread, let idx = messages.firstIndex(where: { $0.id == message.id }) {
             messages[idx].unread = false
         }
@@ -336,6 +340,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = .summarize
         aiEditing = false
         aiOutput = nil
+        aiRedactions = []
         requestAI(action: .summarize,
                   prompt: "用三句话以内概括这封邮件的要点，以及需要我做什么。",
                   message: m,
@@ -349,6 +354,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = .reply
         aiEditing = false
         aiOutput = nil
+        aiRedactions = []
         requestAI(action: .reply, prompt: prompt, message: m, fallback: { Self.localReply(m) })
     }
 
@@ -357,6 +363,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = .classify
         aiEditing = false
         aiOutput = nil
+        aiRedactions = []
         requestAI(action: .classify,
                   prompt: "给这封邮件分类并判断优先级。只输出 JSON：{\"category\":\"...\",\"priority\":\"高|中|低\",\"needs_reply\":true|false}",
                   message: m,
@@ -369,6 +376,7 @@ final class AppModel: ObservableObject {    // 数据
         aiAction = .translate
         aiEditing = false
         aiOutput = nil
+        aiRedactions = []
         requestAI(action: .translate,
                   prompt: "把这封邮件翻译成\(target)，保留原意与结构，只输出译文。",
                   message: m,
@@ -459,6 +467,7 @@ final class AppModel: ObservableObject {    // 数据
                     outboundPreview: redacted.text,
                     simulated: true
                 )
+                aiRedactions = redacted.mappings
                 return
             }
 
@@ -489,6 +498,7 @@ final class AppModel: ObservableObject {    // 数据
             )
             user = redacted.text
             mappings = redacted.mappings
+            aiRedactions = redacted.mappings
         }
 
         aiOutputTrusted = provider.isTrusted(provider.selectedModel)
