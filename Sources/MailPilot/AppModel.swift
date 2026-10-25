@@ -501,22 +501,27 @@ final class AppModel: ObservableObject {    // 数据
             """
         }
 
+        // 这里只看「要不要脱敏」，不看「要不要确认」：用户点「AI 起草」本身就是
+        // 明确的外发意图，再弹一次确认只是噪音。规则仍然问 TrustPolicy，不自己写 if。
+        let system = prefs.systemPrompt(styleSamples: sentSamples)
+        var outboundSystem = system
         var mappings: [Redactor.Mapping] = []
-        if !trusted {
+        if TrustPolicy.decide(action: .reply, trusted: trusted, prefs: prefs.prefs).needsRedaction {
             let redacted = Redactor.redact(
-                user,
+                segments: [system, user],
                 disabledRules: prefs.prefs.disabledRedactionRules,
                 customRules: prefs.prefs.customRedactionRules,
                 keywords: prefs.prefs.redactionKeywords
             )
-            user = redacted.text
+            outboundSystem = redacted.segments[0]
+            user = redacted.segments[1]
             mappings = redacted.mappings
         }
 
         let text = try await AIService.chat(
             provider: provider,
             model: model,
-            system: prefs.systemPrompt(styleSamples: sentSamples),
+            system: outboundSystem,
             user: user
         )
         return mappings.isEmpty ? text : Redactor.restore(text, mappings)
@@ -563,12 +568,28 @@ final class AppModel: ObservableObject {    // 数据
             "主题：\($0.subject)\n发件人：\($0.displaySender)\n\($0.body.prefix(300))"
         }.joined(separator: "\n---\n")
 
+        // 「生成简介」也是把邮件正文发出去，同样受外发策略约束：
+        // 不可信模型先脱敏，返回后再把占位符还原（简介存在本机，不需要保持脱敏）。
+        var payload = ctx
+        var mappings: [Redactor.Mapping] = []
+        if !provider.isTrusted(provider.selectedModel) {
+            let redacted = Redactor.redact(
+                ctx,
+                disabledRules: prefs.prefs.disabledRedactionRules,
+                customRules: prefs.prefs.customRedactionRules,
+                keywords: prefs.prefs.redactionKeywords
+            )
+            payload = redacted.text
+            mappings = redacted.mappings
+        }
+
         do {
-            return try await AIService.chat(
+            let text = try await AIService.chat(
                 provider: provider,
                 system: "你是一个谨慎的中文助理，只根据给定邮件推断，不要编造。",
-                user: "根据以下最近邮件，用 120 字以内写出「我的简介」：我的角色、主要工作内容、常见沟通对象。只输出简介正文。\n\n\(ctx)"
+                user: "根据以下最近邮件，用 120 字以内写出「我的简介」：我的角色、主要工作内容、常见沟通对象。只输出简介正文。\n\n\(payload)"
             )
+            return mappings.isEmpty ? text : Redactor.restore(text, mappings)
         } catch {
             return "生成失败：\(error.localizedDescription)"
         }
@@ -595,13 +616,17 @@ final class AppModel: ObservableObject {    // 数据
         let provider: AIProvider?
         /// 这次请求实际用的模型（翻译可以走专用模型，不等于 provider.selectedModel）
         let model: String
-        let system: String
-        let user: String
+        /// 实际要外发的 system 与 user（已按策略脱敏）
+        var system: String
+        var user: String
+        /// 未脱敏原文。确认框里的「脱敏后发送」要用它重做一遍
+        var originalSystem: String
+        var originalUser: String
         let fallbackText: String
-        let mappings: [Redactor.Mapping]
-        let charCount: Int
+        var mappings: [Redactor.Mapping]
+        var charCount: Int
         /// 脱敏后实际发送的文本，供用户在确认框里逐字检查
-        let outboundPreview: String
+        var outboundPreview: String
         /// 演示模式：不真的发请求，确认后直接给本地结果
         let simulated: Bool
     }
@@ -629,9 +654,10 @@ final class AppModel: ObservableObject {    // 数据
             // 演示模式下没有可用模型，也走一遍完整的「脱敏 → 确认 → 预览」链路，
             // 确认后给本地结果。否则用户不配 key 就永远看不到管控长什么样。
             if isDemo {
+                let system = prefs.systemPrompt(styleSamples: sentSamples)
                 let user = prompt + "\n\n" + context(message)
                 let redacted = Redactor.redact(
-                    user,
+                    segments: [system, user],
                     disabledRules: prefs.prefs.disabledRedactionRules,
                     customRules: prefs.prefs.customRedactionRules,
                     keywords: prefs.prefs.redactionKeywords
@@ -642,11 +668,13 @@ final class AppModel: ObservableObject {    // 数据
                     provider: nil,
                     model: "",
                     system: "",
-                    user: redacted.text,
+                    user: redacted.segments[1],
+                    originalSystem: system,
+                    originalUser: user,
                     fallbackText: fallbackText,
                     mappings: redacted.mappings,
-                    charCount: redacted.text.count,
-                    outboundPreview: redacted.text,
+                    charCount: redacted.segments[1].count,
+                    outboundPreview: redacted.segments[1],
                     simulated: true
                 )
                 aiRedactions = redacted.mappings
@@ -670,24 +698,29 @@ final class AppModel: ObservableObject {    // 数据
                                           model: model,
                                           prefs: prefs.prefs,
                                           exempted: exempted)
-        if case .deny(let reason) = decision {
+        if let reason = decision.denial {
             aiOutput = "已拒绝：\(reason)"
             return
         }
         aiExempted = exempted && !provider.isTrusted(model)
 
+        // system 里也有真实内容（用户简介、发件箱原文样本），必须和 user 一起脱敏。
+        // 两段共用一套占位符编号，否则还原时会把 A 段的邮箱还原成 B 段的。
         let system = prefs.systemPrompt(styleSamples: sentSamples)
-        var user = prompt + "\n\n" + context(message)
+        let user = prompt + "\n\n" + context(message)
+        var outboundSystem = system
+        var outboundUser = user
         var mappings: [Redactor.Mapping] = []
 
         if decision.needsRedaction {
             let redacted = Redactor.redact(
-                user,
+                segments: [system, user],
                 disabledRules: prefs.prefs.disabledRedactionRules,
                 customRules: prefs.prefs.customRedactionRules,
                 keywords: prefs.prefs.redactionKeywords
             )
-            user = redacted.text
+            outboundSystem = redacted.segments[0]
+            outboundUser = redacted.segments[1]
             mappings = redacted.mappings
             aiRedactions = redacted.mappings
         }
@@ -698,12 +731,14 @@ final class AppModel: ObservableObject {    // 数据
             action: action,
             provider: provider,
             model: model,
-            system: system,
-            user: user,
+            system: outboundSystem,
+            user: outboundUser,
+            originalSystem: system,
+            originalUser: user,
             fallbackText: fallbackText,
             mappings: mappings,
-            charCount: user.count,
-            outboundPreview: user,
+            charCount: outboundSystem.count + outboundUser.count,
+            outboundPreview: Self.preview(system: outboundSystem, user: outboundUser),
             simulated: false
         )
 
@@ -714,10 +749,36 @@ final class AppModel: ObservableObject {    // 数据
         performAI(request)
     }
 
-    /// 用户确认后继续
-    func confirmPendingAI() {
-        guard let request = pendingAI else { return }
+    /// 确认框里「查看实际发送的内容」的展示文本：system 与 user 都会发出去，就都要露出来
+    private static func preview(system: String, user: String) -> String {
+        guard !system.isEmpty else { return user }
+        return "【系统提示词】\n\(system)\n\n【邮件内容】\n\(user)"
+    }
+
+    /// 用户确认后继续。
+    ///
+    /// - Parameter redacting: 用户在确认框里选了「脱敏后发送」。
+    ///   这条路径存在的理由：动作策略是「每次确认」时内容本来不脱敏，
+    ///   但用户看到确认框才意识到这封邮件敏感——不该逼他去设置里改永久策略。
+    func confirmPendingAI(redacting: Bool = false) {
+        guard var request = pendingAI else { return }
         pendingAI = nil
+
+        if redacting, request.mappings.isEmpty {
+            let redacted = Redactor.redact(
+                segments: [request.originalSystem, request.originalUser],
+                disabledRules: prefs.prefs.disabledRedactionRules,
+                customRules: prefs.prefs.customRedactionRules,
+                keywords: prefs.prefs.redactionKeywords
+            )
+            request.system = redacted.segments[0]
+            request.user = redacted.segments[1]
+            request.mappings = redacted.mappings
+            request.charCount = request.system.count + request.user.count
+            request.outboundPreview = Self.preview(system: request.system, user: request.user)
+            aiRedactions = redacted.mappings
+        }
+
         performAI(request)
     }
 

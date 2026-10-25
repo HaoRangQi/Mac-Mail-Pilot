@@ -77,6 +77,13 @@ struct ReaderView: View {
                 set: { presented in if !presented { model.pendingAI = nil } }
             )
         ) {
+            // 内容还没脱敏时才给这个选项：用户往往是看到确认框才想起这封邮件敏感，
+            // 不该逼他去设置里改永久策略
+            if model.pendingAI?.mappings.isEmpty == true {
+                Button("脱敏后发送") {
+                    model.confirmPendingAI(redacting: true)
+                }
+            }
             Button("发送", role: .destructive) {
                 model.confirmPendingAI()
             }
@@ -603,7 +610,7 @@ struct ReaderView: View {
         }
         text += "内容量：\(request.charCount) 字符\n"
         if request.mappings.isEmpty {
-            text += "未脱敏：邮件内容将原样发送"
+            text += "未脱敏：邮件内容将原样发送。想先脱敏就点「脱敏后发送」。"
         } else {
             text += "已脱敏 \(request.mappings.count) 处：\(Redactor.summary(request.mappings))"
         }

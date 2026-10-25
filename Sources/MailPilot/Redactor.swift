@@ -60,79 +60,108 @@ struct Redactor {
                        disabledRules: Set<String> = [],
                        customRules: [CustomRedactionRule] = [],
                        keywords: [String] = []) -> (text: String, mappings: [Mapping]) {
-        var output = text
-        var mappings: [Mapping] = []
-        var counters: [String: Int] = [:]
-
-        // 1. 关键字：纯文本匹配，不依赖正则，最可靠
-        let sorted = keywords
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted { $0.count > $1.count }
-
-        for keyword in sorted {
-            var cursor = output.startIndex
-            while let found = output.range(of: keyword, range: cursor..<output.endIndex) {
-                let original = String(output[found])
-                let placeholder: String
-                if let existing = mappings.first(where: { $0.original == original }) {
-                    placeholder = existing.placeholder
-                } else {
-                    let index = (counters["关键字"] ?? 0) + 1
-                    counters["关键字"] = index
-                    placeholder = "⟨关键字\(index)⟩"
-                    mappings.append(Mapping(placeholder: placeholder, original: original))
-                }
-                output.replaceSubrange(found, with: placeholder)
-                // 从占位符之后继续，避免占位符自身被再次命中导致死循环
-                cursor = output.index(found.lowerBound, offsetBy: placeholder.count)
-            }
-        }
-
-        // 2. 内置规则（长模式优先）
-        for rule in rules where !disabledRules.contains(rule.name) {
-            apply(pattern: rule.pattern, type: rule.name,
-                  to: &output, mappings: &mappings, counters: &counters)
-        }
-
-        // 3. 用户自定义正则
-        for rule in customRules where rule.enabled && !disabledRules.contains(rule.name) {
-            apply(pattern: rule.pattern, type: rule.name,
-                  to: &output, mappings: &mappings, counters: &counters)
-        }
-
-        return (output, mappings)
+        let session = Session(disabledRules: disabledRules, customRules: customRules, keywords: keywords)
+        let output = session.redact(text)
+        return (output, session.mappings)
     }
 
-    /// 单条正则规则：正序分配编号（保证序号与出现顺序一致），倒序替换内容（避免 range 错位）
-    private static func apply(pattern: String,
-                              type: String,
-                              to output: inout String,
-                              mappings: inout [Mapping],
-                              counters: inout [String: Int]) {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-        let matches = regex.matches(in: output, range: NSRange(output.startIndex..., in: output))
+    /// 多段文本共用一套编号与映射表（system + user 一起发时必须走这个）。
+    ///
+    /// 为什么不能分两次独立脱敏：两段都会从 `⟨邮箱1⟩` 开始编号，
+    /// 合并成一张映射表后，还原时会把 A 段的邮箱替换成 B 段的，
+    /// 草稿里出现别人的邮箱比不脱敏更糟。
+    static func redact(segments: [String],
+                       disabledRules: Set<String> = [],
+                       customRules: [CustomRedactionRule] = [],
+                       keywords: [String] = []) -> (segments: [String], mappings: [Mapping]) {
+        let session = Session(disabledRules: disabledRules, customRules: customRules, keywords: keywords)
+        let output = segments.map { session.redact($0) }
+        return (output, session.mappings)
+    }
 
-        var assigned: [(range: Range<String.Index>, placeholder: String)] = []
-        for match in matches {
-            guard let range = Range(match.range, in: output) else { continue }
-            let original = String(output[range])
+    /// 一次脱敏过程的状态：计数器与映射表跨段落共享，保证占位符全局唯一
+    final class Session {
+        private let disabledRules: Set<String>
+        private let customRules: [CustomRedactionRule]
+        private let keywords: [String]
 
-            // 同一实体多次出现复用同一个占位符
-            if let existing = mappings.first(where: { $0.original == original }) {
-                assigned.append((range, existing.placeholder))
-                continue
-            }
+        private(set) var mappings: [Mapping] = []
+        private var counters: [String: Int] = [:]
 
-            let index = (counters[type] ?? 0) + 1
-            counters[type] = index
-            let placeholder = "⟨\(type)\(index)⟩"
-            mappings.append(Mapping(placeholder: placeholder, original: original))
-            assigned.append((range, placeholder))
+        init(disabledRules: Set<String> = [],
+             customRules: [CustomRedactionRule] = [],
+             keywords: [String] = []) {
+            self.disabledRules = disabledRules
+            self.customRules = customRules
+            // 关键字按长度降序，避免短词先把长词切碎
+            self.keywords = keywords
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .sorted { $0.count > $1.count }
         }
 
-        for item in assigned.reversed() {
-            output.replaceSubrange(item.range, with: item.placeholder)
+        func redact(_ text: String) -> String {
+            var output = text
+
+            // 1. 关键字：纯文本匹配，不依赖正则，最可靠
+            for keyword in keywords {
+                var cursor = output.startIndex
+                while let found = output.range(of: keyword, range: cursor..<output.endIndex) {
+                    let original = String(output[found])
+                    let placeholder: String
+                    if let existing = mappings.first(where: { $0.original == original }) {
+                        placeholder = existing.placeholder
+                    } else {
+                        let index = (counters["关键字"] ?? 0) + 1
+                        counters["关键字"] = index
+                        placeholder = "⟨关键字\(index)⟩"
+                        mappings.append(Mapping(placeholder: placeholder, original: original))
+                    }
+                    output.replaceSubrange(found, with: placeholder)
+                    // 从占位符之后继续，避免占位符自身被再次命中导致死循环
+                    cursor = output.index(found.lowerBound, offsetBy: placeholder.count)
+                }
+            }
+
+            // 2. 内置规则（长模式优先）
+            for rule in rules where !disabledRules.contains(rule.name) {
+                apply(pattern: rule.pattern, type: rule.name, to: &output)
+            }
+
+            // 3. 用户自定义正则
+            for rule in customRules where rule.enabled && !disabledRules.contains(rule.name) {
+                apply(pattern: rule.pattern, type: rule.name, to: &output)
+            }
+
+            return output
+        }
+
+        /// 单条正则规则：正序分配编号（保证序号与出现顺序一致），倒序替换内容（避免 range 错位）
+        private func apply(pattern: String, type: String, to output: inout String) {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+            let matches = regex.matches(in: output, range: NSRange(output.startIndex..., in: output))
+
+            var assigned: [(range: Range<String.Index>, placeholder: String)] = []
+            for match in matches {
+                guard let range = Range(match.range, in: output) else { continue }
+                let original = String(output[range])
+
+                // 同一实体多次出现复用同一个占位符
+                if let existing = mappings.first(where: { $0.original == original }) {
+                    assigned.append((range, existing.placeholder))
+                    continue
+                }
+
+                let index = (counters[type] ?? 0) + 1
+                counters[type] = index
+                let placeholder = "⟨\(type)\(index)⟩"
+                mappings.append(Mapping(placeholder: placeholder, original: original))
+                assigned.append((range, placeholder))
+            }
+
+            for item in assigned.reversed() {
+                output.replaceSubrange(item.range, with: item.placeholder)
+            }
         }
     }
 

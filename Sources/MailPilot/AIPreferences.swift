@@ -91,10 +91,14 @@ struct AIPreferences: Codable {
 }
 
 /// 不可信模型上某个动作的处置方式
+///
+/// 「脱敏」和「确认」是两个维度，所以有 `redactConfirm` 这个组合项。
+/// 顺序即界面顺序：越靠下越严格。
 enum UntrustedPolicy: String, Codable, CaseIterable, Identifiable {
     case allow = "放行"
     case redact = "脱敏后放行"
     case confirm = "每次确认"
+    case redactConfirm = "脱敏后确认"
     case deny = "禁止"
 
     var id: String { rawValue }
@@ -104,6 +108,7 @@ enum UntrustedPolicy: String, Codable, CaseIterable, Identifiable {
         case .allow: return "内容原样发送，不脱敏、不确认"
         case .redact: return "发送前自动脱敏，按下方规则替换敏感信息"
         case .confirm: return "每次发送前弹框，列出目标服务商、字符数与脱敏项"
+        case .redactConfirm: return "先自动脱敏，再弹框让你确认实际发送的内容"
         case .deny: return "在不可信模型上直接拒绝执行"
         }
     }
@@ -111,10 +116,14 @@ enum UntrustedPolicy: String, Codable, CaseIterable, Identifiable {
 
 /// 内置默认策略。`TrustPolicy` 是唯一决策来源，这里是它的缺省值
 enum PrivacyDefaults {
+    /// 四个动作外发的都是**同一封邮件的正文**（草拟回复和摘要的输入完全一样），
+    /// 所以脱敏要求也应当一样。区别只在确认：
+    /// 只读类（摘要/分类）结果留在本机，确认是噪音；
+    /// 会产生对外内容的（草拟回复/翻译）要让人看一眼再发。
     static func policy(for action: AIAction) -> UntrustedPolicy {
         switch action {
         case .summarize, .classify: return .redact
-        case .reply, .translate: return .confirm
+        case .reply, .translate: return .redactConfirm
         }
     }
 }

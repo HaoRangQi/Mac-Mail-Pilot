@@ -84,7 +84,7 @@ struct PrivacySettingsView: View {
             Toggle("只要用不可信模型，一律先问我", isOn: binding(\.alwaysConfirmUntrusted))
                 .font(.app(12, weight: .medium))
 
-            Text("开启后忽略下面每个动作的单独设置，任何内容发往第三方前都会弹确认框。")
+            Text("开启后任何内容发往第三方前都会弹确认框。它只追加确认，不会取消下面各动作已设的脱敏——该脱敏的仍然先脱敏。")
                 .font(.app(11))
                 .foregroundStyle(.tertiary)
         }
