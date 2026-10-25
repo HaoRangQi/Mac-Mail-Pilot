@@ -2,6 +2,33 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.38] - 2026-10-25
+
+### 新增 · 邮件正文 HTML 渲染（WKWebView）
+
+- 阅读页新增 HTML 渲染管线：`HTMLSanitizer`（Swift 白名单清洗，设计移植自 K-9 Mail）→ cid 图片转 data URI → CSP meta 断网 → WKWebView 渲染，DOMPurify 以 `atDocumentStart` 注入做第二层消毒
+- **三道闸门，互不替代**：Swift 白名单管结构与协议（剥 script/iframe/form/meta，style 声明过滤，资源上限 2MB / 4000 节点）；CSP `default-src 'none'; img-src data:` 管零外联（跟踪像素物理上发不出请求）；DOMPurify 管浏览器真解析后的 mXSS。任何一步失败整体退回纯文本，绝不给用户看原始 HTML
+- **链接策略**：普通 http/https 直接开系统浏览器；四种危险特征才弹确认——可见文字是域名但与实际目标不符、`brand.com@evil.com` 的 @ 伪装、punycode / 西里尔希腊混用同形字、裸 IP；`javascript:` / `data:` 等危险协议剥成不可点纯文本 + ⚠️ 标识
+- **WKWebView 加固**：nonPersistent data store、弹窗全部掐死（`createWebViewWith` 返回 nil、JS 三种面板静默吞掉）、导航 100% 经 App 拦截
+- cid 内联图片按魔法字节识别格式（SVG 不认），单张 ≤2MB、每封 ≤30 张；远程图片默认拦截为「[远程图片]」占位
+- HTML 分支独立布局：头部信息按内容高度 + WebView 自适应填充；文字/链接颜色、字号、行距跟随外观设置（zoom 整体缩放 + calc 补偿，邮件写死的 px 字号也能跟着变大）
+- 纯文本邮件布局与行为不变；HTML 解析失败自动退回纯文本
+- 完整方案调研：`docs/邮件正文HTML渲染方案调研.md`（威胁模型、主流产品对比、为什么不能复用 Apple Mail 渲染栈的核实结论）
+
+### 新增 · 演示数据正规化
+
+- 统一用户身份：五个账号从 `me@` 占位改为一致人设（wangchen@yuanhang-tech.com / wangchen@icloud.com / wangchen@gmail.com / wangchen@outlook.com / 87341265@qq.com），账户名「公司邮箱」→「远航科技」，同事地址同域
+- 清除 RFC 保留域占位（example.com / example.net）：Python Weekly 链接、GitHub 组织名、推广邮件域名全部换成正式地址
+- iCloud 收件箱新增 HTML 演示邮件「深读周刊 · 第 42 期」：table 布局 + 内联样式的典型周刊邮件，含 cid 内联 logo、正常外链、一张会被默认拦截的追踪像素——演示模式下不依赖 FDA 即可验证渲染全链路
+
+### 修复
+
+- **侧边栏账号行与服务商重名**：「Gmail 大类 > Gmail 账号」纯重复行。账号名与服务商同名（大小写不敏感）时退回显示邮箱名前缀
+- **中文域名全量误伤（链接策略）**：`URL.host` 会把中文域名规范化成 punycode（`淘宝网.com` → `xn--…`），导致所有中文域名都被判「易混淆编码」弹确认。改为从 href 原文解析域名
+- **链接「文字域名不符」检测未生效**：sanitizer 此前没把可见文字传进判定，D1 是死代码。已修
+- **HTML 邮件头部大片空白**：头部信息区套了贪心的 ScrollView，会把 maxHeight 全额吃掉，内容短时下面空近 200pt。改为按内容实际高度
+- **正文字号对 HTML 邮件无效**：两个原因——渲染任务不认字号变化（`.task(id:)` 只绑 message.id）；邮件正文普遍写死 px 字号，body 的 font-size 管不动。改为字号参与渲染 key + zoom 整体缩放
+
 ## [0.2.37] - 2026-10-25
 
 ### 新增 · 写邮件 AI

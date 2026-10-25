@@ -12,13 +12,19 @@ enum EmlxParser {
         var bcc: [String] = []
         var date: Date?
         var body = ""
+        /// text/html 原文。空 = 这封邮件没有 HTML 正文（纯文本或解析不出）
+        var htmlBody = ""
+        /// Content-ID → 内联图片数据。WKWebView 不解析 cid: 协议，渲染前要转 data URI
+        var inlineImages: [String: Data] = [:]
         var hasAttachments = false
         var messageID = ""
         var deliveredTo = ""
     }
 
     static func parse(url: URL, includeBody: Bool) -> Parsed? {
-        let limit = includeBody ? 800_000 : 24_000
+        // HTML 正文 + 内联图片可能撑得很大，读上限放到 2MB；
+        // 只取列表预览时仍只读 24KB
+        let limit = includeBody ? 2_000_000 : 24_000
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let data = try? handle.read(upToCount: limit), !data.isEmpty else { return nil }
@@ -51,8 +57,10 @@ enum EmlxParser {
         parsed.deliveredTo = (headers["delivered-to"] ?? headers["x-original-to"] ?? "")
             .trimmingCharacters(in: .whitespaces)
 
-        let body = extractBody(headers: headers, body: bodyText)
-        parsed.body = includeBody ? body : String(body.prefix(400))
+        let content = extractContent(headers: headers, body: bodyText, includeImages: includeBody)
+        parsed.body = includeBody ? content.text : String(content.text.prefix(400))
+        parsed.htmlBody = includeBody ? content.html : ""
+        parsed.inlineImages = includeBody ? content.images : [:]
         parsed.hasAttachments = (headers["content-type"] ?? "").lowercased().contains("multipart/mixed")
         return parsed
     }
@@ -102,12 +110,20 @@ enum EmlxParser {
 
     // MARK: - 正文
 
-    private static func extractBody(headers: [String: String], body: String) -> String {
+    private struct BodyContent {
+        var text = ""
+        var html = ""
+        var images: [String: Data] = [:]
+    }
+
+    /// 一次遍历同时收集 text/plain、text/html 和带 Content-ID 的内联图片。
+    /// 旧版只返回纯文本（HTML 被剥掉），阅读页要渲染 HTML 就必须保留原文。
+    private static func extractContent(headers: [String: String], body: String, includeImages: Bool) -> BodyContent {
         let contentType = headers["content-type"] ?? "text/plain"
         let lower = contentType.lowercased()
+        var content = BodyContent()
 
         if lower.contains("multipart/"), let boundary = boundaryValue(from: contentType) {
-            var htmlFallback = ""
             let parts = body.components(separatedBy: "--" + boundary)
             for part in parts {
                 let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -117,23 +133,55 @@ enum EmlxParser {
                 let partType = (parsed["content-type"] ?? "text/plain").lowercased()
 
                 if partType.contains("multipart/") {
-                    let nested = extractBody(headers: parsed, body: partBody)
-                    if !nested.isEmpty { return nested }
+                    let nested = extractContent(headers: parsed, body: partBody, includeImages: includeImages)
+                    if content.text.isEmpty { content.text = nested.text }
+                    if content.html.isEmpty { content.html = nested.html }
+                    content.images.merge(nested.images) { current, _ in current }
                     continue
                 }
-                if partType.contains("text/plain") {
+                if partType.contains("text/plain"), content.text.isEmpty {
                     let text = decodeSingle(headers: parsed, body: partBody)
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { content.text = text }
                 }
-                if partType.contains("text/html"), htmlFallback.isEmpty {
-                    htmlFallback = decodeSingle(headers: parsed, body: partBody)
+                if partType.contains("text/html"), content.html.isEmpty {
+                    content.html = decodeSingle(headers: parsed, body: partBody)
+                }
+                if includeImages, partType.hasPrefix("image/"), !partType.contains("svg") {
+                    let cid = (parsed["content-id"] ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
+                    if !cid.isEmpty, content.images.count < 30,
+                       let data = decodePartData(headers: parsed, body: partBody), data.count <= 2_097_152 {
+                        content.images[cid] = data
+                    }
                 }
             }
-            return readableText(fromHTML: htmlFallback)
+        } else {
+            let text = decodeSingle(headers: headers, body: body)
+            if lower.contains("text/html") {
+                content.html = text
+            } else {
+                content.text = text
+            }
         }
 
-        let text = decodeSingle(headers: headers, body: body)
-        return lower.contains("text/html") ? readableText(fromHTML: text) : text
+        // 没有 text/plain 时退回「剥标签的 HTML」——AI 摘要、复制全文、搜索都依赖它
+        if content.text.isEmpty, !content.html.isEmpty {
+            content.text = readableText(fromHTML: content.html)
+        }
+        return content
+    }
+
+    /// 附件 part 的原始字节（内联图片用）。不做 charset 转换——图片不是文本。
+    private static func decodePartData(headers: [String: String], body: String) -> Data? {
+        let encoding = (headers["content-transfer-encoding"] ?? "").lowercased()
+        switch encoding {
+        case "base64":
+            let cleaned = body.components(separatedBy: .whitespacesAndNewlines).joined()
+            return Data(base64Encoded: cleaned, options: [.ignoreUnknownCharacters])
+        case "quoted-printable":
+            return decodeQuotedPrintable(body)
+        default:
+            return Data(body.utf8)
+        }
     }
 
     /// HTML 剥离后可能只剩空白（例如纯 CSS 排版通知），给一句明确提示而不是留白

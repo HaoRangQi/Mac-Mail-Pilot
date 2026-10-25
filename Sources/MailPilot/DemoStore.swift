@@ -20,11 +20,11 @@ final class DemoStore: MailStore {
 
     private func buildAccounts() {
         let defs: [(String, String, String, String)] = [
-            ("work", "公司邮箱", "me@company.com", "exchange"),
-            ("icloud", "iCloud", "me@icloud.com", "icloud"),
-            ("gmail", "Gmail", "me@gmail.com", "gmail"),
-            ("outlook", "Outlook", "me@outlook.com", "exchange"),
-            ("qq", "QQ 邮箱", "me@qq.com", "imap"),
+            ("work", "远航科技", "wangchen@yuanhang-tech.com", "exchange"),
+            ("icloud", "iCloud", "wangchen@icloud.com", "icloud"),
+            ("gmail", "Gmail", "wangchen@gmail.com", "gmail"),
+            ("outlook", "Outlook", "wangchen@outlook.com", "exchange"),
+            ("qq", "QQ 邮箱", "87341265@qq.com", "imap"),
         ]
         accountsList = defs.map { Account(id: "acc-\($0.0)", name: $0.1, email: $0.2, provider: $0.3) }
     }
@@ -59,7 +59,7 @@ final class DemoStore: MailStore {
                 id: "msg-101", accountID: "acc-work", mailboxID: "mb-work-inbox",
                 subject: "华信科技 Q4 设备采购合同 · 签约信息确认",
                 sender: "李思远", senderEmail: "lisiyuan@huaxin-tech.com",
-                recipients: ["me@company.com"],
+                recipients: ["wangchen@yuanhang-tech.com"],
                 cc: ["legal@huaxin-tech.com", "zhangwei@acme-corp.com"],
                 date: ago(1),
                 preview: "王总您好，关于 Q4 设备采购合同，双方已就条款达成一致。以下是我方签约主体信息……",
@@ -88,7 +88,7 @@ final class DemoStore: MailStore {
                 id: "msg-102", accountID: "acc-icloud", mailboxID: "mb-icloud-inbox",
                 subject: "您的 Yahoo 账户刚刚在一台新设备上登录",
                 sender: "Yahoo 账户安全", senderEmail: "no-reply@cc.yahoo.com",
-                recipients: ["me@icloud.com"],
+                recipients: ["wangchen@icloud.com"],
                 date: ago(3),
                 preview: "如果这不是您本人操作，请立即修改密码并开启两步验证……",
                 body: """
@@ -99,7 +99,7 @@ final class DemoStore: MailStore {
                 IP 地址：220.181.38.148
                 地点：中国 北京
 
-                登录账号：yhcopilot@yahoo.com
+                登录账号：wangchen87@yahoo.com
                 绑定手机：18612349876
                 备用邮箱：backup2024@gmail.com
 
@@ -107,11 +107,11 @@ final class DemoStore: MailStore {
                 · Yahoo Mail Plus 续费金额 ¥198.00/年，下次扣款 11月3日
                 · 云存储扩容 2TB，费用 128元/月
 
-                如果这不是您本人操作，请立即联系客服 4001234567 或回信至 security@yahoo-inc.com。
+                如果这不是您本人操作，请立即联系客服 4001234567 或回信至 security@yahoo.com。
                 """,
                 unread: true, flagged: true, threadID: "th-yahoo-security"
             ),
-            // ---- 公司邮箱 ----
+            // ---- 远航科技（工作邮箱）----
             Message(
                 id: "msg-001", accountID: "acc-work", mailboxID: "mb-work-inbox",
                 subject: "关于 Q4 批量采购的报价咨询",
@@ -136,7 +136,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-003", accountID: "acc-work", mailboxID: "mb-work-inbox",
                 subject: "Re: 服务器维护窗口确认",
-                sender: "李娜", senderEmail: "lina@company.com",
+                sender: "李娜", senderEmail: "lina@yuanhang-tech.com",
                 date: ago(8), preview: "收到，周六凌晨 2 点到 4 点的窗口没问题，我这边会提前把监控告警静音……",
                 body: """
                 收到，周六凌晨 2 点到 4 点的窗口没问题，我这边会提前把监控告警静音。
@@ -150,7 +150,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-004", accountID: "acc-work", mailboxID: "mb-work-inbox",
                 subject: "2026 年度体检安排通知",
-                sender: "行政部", senderEmail: "hr@company.com",
+                sender: "行政部", senderEmail: "hr@yuanhang-tech.com",
                 date: ago(26), preview: "本年度体检定于 11 月 6 日至 10 日，请各位同事在系统中选择时段……",
                 body: """
                 各位同事：
@@ -190,7 +190,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-009", accountID: "acc-work", mailboxID: "mb-work-inbox",
                 subject: "招聘：高级后端工程师（内推）",
-                sender: "陈磊", senderEmail: "chenlei@company.com",
+                sender: "陈磊", senderEmail: "chenlei@yuanhang-tech.com",
                 date: ago(120), preview: "团队在招一名高级后端，偏基础设施方向，方便的话帮我转一下……",
                 body: """
                 团队在招一名高级后端，偏基础设施方向，JD 如下：
@@ -208,14 +208,14 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-010", accountID: "acc-work", mailboxID: "mb-work-drafts",
                 subject: "（草稿）Q4 报价方案",
-                sender: "我", senderEmail: "me@company.com",
+                sender: "我", senderEmail: "wangchen@yuanhang-tech.com",
                 date: ago(1), preview: "张伟您好，关于 200 台的阶梯报价，我们的方案是……",
                 body: "张伟您好，\n\n关于 200 台的阶梯报价，我们的方案是：\n100 台：单价 ¥2,180\n200 台：单价 ¥2,050\n500 台：单价 ¥1,890\n\n账期可以给到 60 天。"
             ),
             Message(
                 id: "msg-011", accountID: "acc-work", mailboxID: "mb-work-sent",
                 subject: "Re: Q3 复盘会议纪要",
-                sender: "我", senderEmail: "me@company.com",
+                sender: "我", senderEmail: "wangchen@yuanhang-tech.com",
                 date: ago(70), preview: "纪要已更新到共享文档，补充了三个待办项和负责人……",
                 body: "各位，纪要已更新到共享文档，补充了三个待办项和负责人，请相关同事本周内确认。",
                 threadID: "th-q3"
@@ -237,7 +237,7 @@ final class DemoStore: MailStore {
                 · 一个把 SwiftUI 界面导出成图片的工具
                 · 轻量级任务队列，无 Redis 依赖
 
-                阅读全文：https://example.com/pw/612
+                阅读全文：https://pythonweekly.com/issues/612
                 """,
                 unread: true
             ),
@@ -257,21 +257,65 @@ final class DemoStore: MailStore {
             ),
             Message(
                 id: "msg-008", accountID: "acc-icloud", mailboxID: "mb-icloud-inbox",
-                subject: "本周阅读清单：关于注意力的三篇文章",
-                sender: "得到每周荐书", senderEmail: "digest@example.com",
-                date: ago(96), preview: "这期聊一个反直觉的结论：注意力不是被夺走的，是被我们自己交出去的……",
+                subject: "深读周刊 · 第 42 期：注意力不是被夺走的",
+                sender: "深读周刊", senderEmail: "digest@shenduweekly.com",
+                date: ago(96), preview: "这期聊一个反直觉的结论：注意力不是被夺走的，是被我们自己交出来的……",
                 body: """
+                深读周刊 · 第 42 期
+
                 这期聊一个反直觉的结论：注意力不是被夺走的，是被我们自己交出去的。
 
                 三篇文章分别从神经科学、产品设计和组织行为的角度讨论同一件事——为什么我们明知该专注，却仍然不断切换。
 
-                约 25 分钟读完。
-                """
+                · 大脑的「切换税」：每次分心，重新进入状态需要 23 分钟
+                · 产品设计如何利用你的默认选项
+                · 为什么会议越多，决定越少
+
+                约 25 分钟读完。阅读全文：https://shenduweekly.com/issues/42
+                """,
+                unread: true,
+                // 演示 HTML 渲染：table 布局 + 内联样式（典型周刊邮件）、
+                // cid 内联 logo、正常外链，以及一张会被默认拦截的远程追踪像素
+                htmlBody: """
+                <html><body style="margin:0;padding:0;background:#f4f4f6;">
+                <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f6"><tr><td align="center" style="padding:24px 12px;">
+                <table width="560" cellpadding="0" cellspacing="0" border="0" bgcolor="#ffffff" style="max-width:560px;">
+                <tr><td style="padding:28px 36px 6px 36px;">
+                  <img src="cid:logo@shenduweekly" width="40" height="40" alt="深读周刊" style="display:block;border:0;">
+                  <div style="padding-top:10px;font-size:13px;color:#8a8a8e;">深读周刊 · 第 42 期</div>
+                </td></tr>
+                <tr><td style="padding:10px 36px 0 36px;">
+                  <h1 style="margin:0 0 14px 0;font-size:22px;line-height:1.35;color:#1d1d1f;">注意力不是被夺走的，是被我们自己交出去的</h1>
+                  <p style="margin:0 0 18px 0;font-size:14px;line-height:1.7;color:#3a3a3c;">这期聊一个反直觉的结论。三篇文章分别从神经科学、产品设计和组织行为的角度讨论同一件事——为什么我们明知该专注，却仍然不断切换。</p>
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr><td style="padding:11px 14px;background:#f7f7f9;border-radius:8px;font-size:14px;">
+                      <a href="https://shenduweekly.com/articles/switching-tax" style="color:#1d357a;text-decoration:none;">大脑的「切换税」：每次分心，重新进入状态需要 23 分钟</a>
+                    </td></tr>
+                    <tr><td style="padding:11px 14px;background:#f7f7f9;border-radius:8px;font-size:14px;">
+                      <a href="https://shenduweekly.com/articles/default-options" style="color:#1d357a;text-decoration:none;">产品设计如何利用你的默认选项</a>
+                    </td></tr>
+                    <tr><td style="padding:11px 14px;background:#f7f7f9;border-radius:8px;font-size:14px;">
+                      <a href="https://shenduweekly.com/articles/meetings" style="color:#1d357a;text-decoration:none;">为什么会议越多，决定越少</a>
+                    </td></tr>
+                  </table>
+                  <p style="margin:18px 0 16px 0;font-size:13px;color:#8a8a8e;">约 25 分钟读完。</p>
+                  <img src="https://track.shenduweekly.com/open?id=42&amp;u=87341265" width="1" height="1" alt="" style="display:block;border:0;">
+                </td></tr>
+                <tr><td style="padding:16px 36px 28px 36px;border-top:1px solid #ececee;">
+                  <p style="margin:0;font-size:12px;color:#a0a0a5;">深读周刊 · 每周一发送 · <a href="https://shenduweekly.com/unsubscribe" style="color:#a0a0a5;">退订</a></p>
+                </td></tr>
+                </table>
+                </td></tr></table>
+                </body></html>
+                """,
+                inlineImages: [
+                    "logo@shenduweekly": Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAzUlEQVR42u3bsRHCMAxAUS3CGCyXvdPQQEfDEcglcmzr+c4D/FclthWxc93uy7PnHWev3oPTQEYPPwQxW/wuhFnj/0KYPX4ToUr8V4TSANXiPxAAACgMUDX+jQAAAAAAABrudX1s7mkBfoVfBRG9hbeGiJ7jWyBE7/HZCDFCfCZCjBKfhQBgpPgMBACjxZ+NAAAAAAAAAADwIQTAzxAAByKOxByKOhZ3MeJqzOUoAAAAAHgr6KUoAABmBkyMmBsyOWZ20PRozXjD04XG519ZUXG5j5vl/gAAAABJRU5ErkJggg==") ?? Data()
+                ]
             ),
             Message(
                 id: "msg-012", accountID: "acc-icloud", mailboxID: "mb-icloud-sent",
                 subject: "Re: 家庭照片共享",
-                sender: "我", senderEmail: "me@icloud.com",
+                sender: "我", senderEmail: "wangchen@icloud.com",
                 date: ago(140), preview: "相册已经建好了，把你们都加进去了，链接在下面……",
                 body: "相册已经建好了，把你们都加进去了。"
             ),
@@ -282,7 +326,7 @@ final class DemoStore: MailStore {
                 subject: "[mailpilot] #42 新的 Pull Request",
                 sender: "GitHub", senderEmail: "notifications@github.com",
                 date: ago(3), preview: "feat: 支持按账号分组显示侧边栏 — opened by you",
-                body: "feat: 支持按账号分组显示侧边栏\n\nopened by you · 2 commits · 3 files changed\n\n查看：https://github.com/example/mailpilot/pull/42"
+                body: "feat: 支持按账号分组显示侧边栏\n\nopened by you · 2 commits · 3 files changed\n\n查看：https://github.com/mailpilot-app/mailpilot/pull/42"
             ),
             Message(
                 id: "msg-021", accountID: "acc-gmail", mailboxID: "mb-gmail-inbox",
@@ -303,7 +347,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-023", accountID: "acc-gmail", mailboxID: "mb-gmail-sent",
                 subject: "Re: 周末爬山",
-                sender: "我", senderEmail: "me@gmail.com",
+                sender: "我", senderEmail: "wangchen@gmail.com",
                 date: ago(60), preview: "周六早上七点在山脚集合？我带水。",
                 body: "周六早上七点在山脚集合？我带水。"
             ),
@@ -319,7 +363,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-031", accountID: "acc-outlook", mailboxID: "mb-outlook-inbox",
                 subject: "会议邀请：周一产品评审",
-                sender: "王强", senderEmail: "wangqiang@company.com",
+                sender: "王强", senderEmail: "wangqiang@yuanhang-tech.com",
                 date: ago(11), preview: "时间：周一 10:00-11:30，会议室 B，议题是下个版本的范围裁剪……",
                 body: "时间：周一 10:00-11:30\n地点：会议室 B\n议题：下个版本的范围裁剪\n\n请提前看一下需求池里标红的条目。",
                 needsReply: true
@@ -327,7 +371,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-032", accountID: "acc-outlook", mailboxID: "mb-outlook-trash",
                 subject: "【推广】限时优惠：云服务器 1 折起",
-                sender: "云服务推广", senderEmail: "promo@example.net",
+                sender: "云服务推广", senderEmail: "promo@feiyuncloud.com",
                 date: ago(33), preview: "新用户专享，2 核 4G 首年 ¥99……",
                 body: "新用户专享，2 核 4G 首年 ¥99。活动截止本月底。"
             ),
@@ -351,7 +395,7 @@ final class DemoStore: MailStore {
             Message(
                 id: "msg-042", accountID: "acc-qq", mailboxID: "mb-qq-sent",
                 subject: "Re: 域名续费",
-                sender: "我", senderEmail: "me@qq.com",
+                sender: "我", senderEmail: "87341265@qq.com",
                 date: ago(100), preview: "域名已经续了三年，发票稍后发你。",
                 body: "域名已经续了三年，发票稍后发你。"
             ),

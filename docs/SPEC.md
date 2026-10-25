@@ -1,6 +1,6 @@
 # MailPilot Native — 规格与实现状态
 
-> 2026-10-25 02:45 更新。原生 macOS App，SwiftUI + Liquid Glass。
+> 2026-10-25 12:00 更新。原生 macOS App，SwiftUI + Liquid Glass。
 
 ## 1. 产品定义
 
@@ -97,6 +97,9 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **写邮件页 AI**（0.2.37）：主题行下方 AI 条，按意图起草正文；正文非空时切换为「AI 修稿」按意图改写全文。主题作为显式约束写进提示词防跑偏，不填主题则约束不出现。外发内容只有用户意图 + 主题（修稿时含当前正文），不可信模型仍脱敏但**不弹确认**——用户点「AI 起草」本身即明确外发意图，且邮件正文不在外发内容里
 - **AI 问答浮层 AskBar**（0.2.37）：Markdown 渲染（`MarkdownText`，按行切块 + `AttributedString` 行内样式）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。`MarkdownText` 的 `inline()` 返回 `some View`（`Text.textSelection` 不返回 Text）
 - **AI 问答空响应自愈**（0.2.37）：reasoning 模型 `content` 为空时自动重试一次（`tool_choice: none` + 要求直接回答），仍空则抛 `AIError.emptyResponse(diagnostic)`，诊断含 finish_reason / 是否只思考 / completion_tokens；Anthropic `max_tokens` 提到 4096
+- **邮件正文 HTML 渲染**（0.2.38）：阅读页新增 WKWebView 渲染管线，`EmlxParser` 保留 text/html 原文与带 Content-ID 的内联图片（读上限 800KB → 2MB）。三层防线：`HTMLSanitizer`（Swift 白名单，设计移植自 K-9 Mail，Apache-2.0）管结构与协议 → CSP meta（`default-src 'none'; img-src data:`）管零外联 → DOMPurify（`atDocumentStart` 注入，双许可）管 mXSS；任一环失败整体退回纯文本。链接策略：普通 http/https 直接开系统浏览器，四种危险特征（可见文字域名与实际目标不符 / `brand.com@evil.com` @ 伪装 / punycode 或西里尔希腊混用同形字 / 裸 IP）弹确认展示真实地址，`javascript:` 等危险协议降级为不可点文本。WKWebView 加固：nonPersistent data store、弹窗全掐死、导航 100% 经 App 拦截。cid 图片 App 侧转 data URI（魔法字节定格式，SVG 不认，≤2MB/张、≤30 张）。**域名判定必须从 href 原文解析**——`URL.host` 会把中文域名规范化成 punycode，直接用它会把所有中文域名误判为「易混淆编码」（实测踩坑）。正文字号经 zoom 整体缩放 + calc 补偿联动。方案调研与威胁模型见 `docs/邮件正文HTML渲染方案调研.md`
+- **演示数据正规化**（0.2.38）：五个账号统一人设地址（清除 `me@` 与 example.com 占位）；iCloud 收件箱新增 HTML 演示邮件（cid logo + 正常外链 + 会被拦截的追踪像素），演示模式下即可验证渲染全链路
+- **侧边栏账号行防重名**（0.2.38）：账号名与服务商同名时退回显示邮箱名前缀（真实用户也常把账号命名成 "Gmail"）
 
 部分完成 / 有已知缺陷：
 
@@ -109,7 +112,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 - **AI 批量处理交互**：`moveToTrash` 已可被 AI 调用（带确认），但「按提示找邮件 → 确认批量处理」的完整体验还没做
 - 附件保存、规则、归档、会话视图
-- **邮件正文渲染（当前体验最差的一环，优先修）**：0.2.9 已修掉「`<style>` 里的 CSS 源码混进正文」，但本质仍是 **HTML → 纯文本**，加粗、斜体、链接、列表层级、引用、表格、内嵌图片全部丢失，长邮件读起来就是一坨等宽文字。要做真渲染：用 `WKWebView` 加载原始 HTML（或 `NSAttributedString(data:options:)` 走富文本），需一并处理——远程图片加载策略（默认禁用以保护隐私，给「显示图片」按钮）、链接点击交给系统浏览器、禁用 JS、深色模式下强制文字颜色可读、正文高度自适应
+- ~~**邮件正文渲染**~~（0.2.38 已实现，见「已完成」节；**遗留**：远程图片「加载图片」按钮与设置三档未做，当前只能看「[远程图片]」占位）
 - **本地模型预检（方案B，已评估未实现）**：用本地小模型给邮件打「敏感度 1-10」，高分时把处置从 redact 升级为 confirm/deny。路线首选 macOS 26 的 Foundation Models（`LanguageModelSession`），次选 MLX Swift；llama.cpp 因 0.5B CPU 推理 10-20 token/s、1000 token 邮件要 1 分钟+，不适合交互场景。**小模型只打分、不改写正文**
 - **补开工具**：`markRead` / `setFlag`（需扩展 `MailStore` 协议，可能要借道 AppleScript）、`saveDraft` / `sendMessage`
 - **MCP Server**：把同一套 `MailTool` 用 MCP 协议导出，让外部客户端（Claude Desktop 等）连接。tool calling 是共用地基，此项是薄适配层

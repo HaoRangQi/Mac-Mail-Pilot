@@ -477,7 +477,9 @@ final class NativeMailStore: MailStore {
             needsReply: false,
             threadID: parsed.messageID,
             messageID: parsed.messageID,
-            attachments: []
+            attachments: [],
+            htmlBody: parsed.htmlBody,
+            inlineImages: parsed.inlineImages
         )
     }
 }

@@ -78,10 +78,17 @@ struct SidebarView: View {
         }
     }
 
-    /// 账号名多半就是邮箱地址，显示时去掉 @ 后面那截，省宽度
+    /// 账号名多半就是邮箱地址，显示时去掉 @ 后面那截，省宽度。
+    /// 账号名与服务商同名时（演示数据的 "Gmail"/"iCloud"，真实用户也常把账号直接命名成
+    /// "Gmail"）会出现「Gmail 大类 > Gmail 账号」的重复行——退回显示邮箱名前缀，
+    /// 至少能看出是这个服务商下的哪个地址
     private func displayName(_ account: Account) -> String {
         let name = account.name.trimmingCharacters(in: .whitespaces)
-        if name.isEmpty { return account.email }
+        let emailName = account.email.split(separator: "@").first.map(String.init) ?? ""
+        if name.isEmpty || name.caseInsensitiveCompare(account.service.label) == .orderedSame {
+            if !emailName.isEmpty { return emailName }
+            return name.isEmpty ? "未命名账号" : name
+        }
         if name.contains("@") {
             return String(name.split(separator: "@").first ?? Substring(name))
         }

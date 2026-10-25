@@ -100,6 +100,11 @@ struct Message: Identifiable, Hashable {
     /// RFC 2822 Message-ID（含尖括号），AppleScript 在「邮件」App 中定位消息用
     var messageID: String = ""
     var attachments: [Attachment] = []
+    /// HTML 正文原文（有才走 WebView 渲染；空则用 body 纯文本显示）。
+    /// 清洗、断网、链接策略全在渲染层做，原文不进 WebView
+    var htmlBody: String = ""
+    /// Content-ID → 内联图片数据（cid: 图片转 data URI 用）
+    var inlineImages: [String: Data] = [:]
 
     var displaySender: String {
         sender.isEmpty ? senderEmail : sender

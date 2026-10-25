@@ -117,120 +117,147 @@ struct ReaderView: View {
 
     private func detail(_ message: Message) -> some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(message.subject)
-                        .font(.app(19, weight: .semibold))
-                        .lineSpacing(2)
-                        .textSelection(.enabled)
-                        .padding(.bottom, 10)
+            if message.htmlBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                // 纯文本邮件：单滚动布局（原有行为，正文和头部一起滚）
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        messageHeader(message)
 
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(message.displaySender)
-                            .font(.app(13.5, weight: .semibold))
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-
-                        if !message.senderEmail.isEmpty {
-                            Text(message.senderEmail)
-                                .font(.app(12))
-                                .foregroundStyle(.secondary)
+                        if message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("（这封邮件没有正文）")
+                                .font(.app(12.5))
+                                .foregroundStyle(.tertiary)
+                        } else {
+                            Text(message.body)
+                                .font(.app(UIState.readerFontSize))
+                                .lineSpacing(UIState.readerLineSpacing)
                                 .textSelection(.enabled)
-
-                            Button {
-                                copyToPasteboard(message.senderEmail)
-                                model.showToast("已复制邮箱地址")
-                            } label: {
-                                Image(systemName: "doc.on.doc")
-                                    .font(.app(9.5))
-                                    .foregroundStyle(.tertiary)
-                            }
-                            .buttonStyle(.plain)
-                            .help("复制发件人邮箱")
+                                .frame(maxWidth: 760, alignment: .leading)
                         }
 
-                        Spacer(minLength: 10)
-
-                        Text(dateText(message.date))
-                            .font(.app(11.5))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
+                        attachmentsRow(message)
                     }
-                    .contextMenu {
-                        Button("复制发件人") {
-                            copyToPasteboard(message.displaySender)
-                            model.showToast("已复制发件人")
-                        }
-                        Button("复制邮箱地址") {
-                            copyToPasteboard(message.senderEmail)
-                            model.showToast("已复制邮箱地址")
-                        }
-                        Button("复制主题") {
-                            copyToPasteboard(message.subject)
-                            model.showToast("已复制主题")
-                        }
-                        Divider()
-                        Button("复制邮件全文") {
-                            let header = "\(message.subject)\n\(message.displaySender) <\(message.senderEmail)>\n\(dateText(message.date))\n\n"
-                            copyToPasteboard(header + message.body)
-                            model.showToast("已复制邮件全文")
-                        }
-                    }
-
-                    addressRow("收件人", message.recipients)
-                    addressRow("抄送", message.cc)
-                    addressRow("密送", message.bcc)
-
-                    HStack(spacing: 6) {
-                        if message.needsReply { Chip(text: "待回复") }
-                        if message.flagged { Chip(text: "已标记") }
-                        if !message.threadID.isEmpty { Chip(text: "会话") }
-                    }
-                    .padding(.top, 9)
-
-                    Divider().opacity(0.5).padding(.vertical, 14)
-
-                    if message.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text("（这封邮件没有正文）")
-                            .font(.app(12.5))
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        Text(message.body)
-                            .font(.app(UIState.readerFontSize))
-                            .lineSpacing(UIState.readerLineSpacing)
-                            .textSelection(.enabled)
-                            .frame(maxWidth: 760, alignment: .leading)
-                    }
-
-                    if !message.attachments.isEmpty {
-                        HStack(spacing: 7) {
-                            ForEach(message.attachments) { att in
-                                HStack(spacing: 5) {
-                                    Image(systemName: "paperclip")
-                                        .font(.app(10))
-                                    Text(att.filename)
-                                        .font(.app(11.5))
-                                    if !att.sizeText.isEmpty {
-                                        Text(att.sizeText)
-                                            .font(.app(10.5))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                }
-                                .padding(.horizontal, 9)
-                                .frame(height: 26)
-                                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-                            }
-                        }
-                        .padding(.top, 16)
-                    }
+                    .padding(.horizontal, 26)
+                    .padding(.top, 22)
+                    .padding(.bottom, 20)
+                }
+                .hoverScrollIndicators()
+            } else {
+                // HTML 邮件：头部信息按内容实际高度（不套 ScrollView——ScrollView 是贪心的，
+                // 会把 maxHeight 全额吃掉，头部内容短时下面空一大片），WebView 自适应填充（内部自己滚）
+                VStack(alignment: .leading, spacing: 0) {
+                    messageHeader(message)
+                    attachmentsRow(message)
                 }
                 .padding(.horizontal, 26)
                 .padding(.top, 22)
-                .padding(.bottom, 20)
+                .padding(.bottom, 16)
+
+                MailBodyView(message: message)
             }
-            .hoverScrollIndicators()
 
             aiBar
+        }
+    }
+
+    /// 主题 / 发件人 / 收件人行 / 标签 + 底部分隔线。两种布局共用
+    @ViewBuilder
+    private func messageHeader(_ message: Message) -> some View {
+        Text(message.subject)
+            .font(.app(19, weight: .semibold))
+            .lineSpacing(2)
+            .textSelection(.enabled)
+            .padding(.bottom, 10)
+
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(message.displaySender)
+                .font(.app(13.5, weight: .semibold))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+
+            if !message.senderEmail.isEmpty {
+                Text(message.senderEmail)
+                    .font(.app(12))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                Button {
+                    copyToPasteboard(message.senderEmail)
+                    model.showToast("已复制邮箱地址")
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.app(9.5))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("复制发件人邮箱")
+            }
+
+            Spacer(minLength: 10)
+
+            Text(dateText(message.date))
+                .font(.app(11.5))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+        }
+        .contextMenu {
+            Button("复制发件人") {
+                copyToPasteboard(message.displaySender)
+                model.showToast("已复制发件人")
+            }
+            Button("复制邮箱地址") {
+                copyToPasteboard(message.senderEmail)
+                model.showToast("已复制邮箱地址")
+            }
+            Button("复制主题") {
+                copyToPasteboard(message.subject)
+                model.showToast("已复制主题")
+            }
+            Divider()
+            Button("复制邮件全文") {
+                let header = "\(message.subject)\n\(message.displaySender) <\(message.senderEmail)>\n\(dateText(message.date))\n\n"
+                copyToPasteboard(header + message.body)
+                model.showToast("已复制邮件全文")
+            }
+        }
+
+        addressRow("收件人", message.recipients)
+        addressRow("抄送", message.cc)
+        addressRow("密送", message.bcc)
+
+        HStack(spacing: 6) {
+            if message.needsReply { Chip(text: "待回复") }
+            if message.flagged { Chip(text: "已标记") }
+            if !message.threadID.isEmpty { Chip(text: "会话") }
+        }
+        .padding(.top, 9)
+
+        Divider().opacity(0.5).padding(.vertical, 14)
+    }
+
+    /// 附件列表。两种布局共用；空列表整块不渲染
+    @ViewBuilder
+    private func attachmentsRow(_ message: Message) -> some View {
+        if !message.attachments.isEmpty {
+            HStack(spacing: 7) {
+                ForEach(message.attachments) { att in
+                    HStack(spacing: 5) {
+                        Image(systemName: "paperclip")
+                            .font(.app(10))
+                        Text(att.filename)
+                            .font(.app(11.5))
+                        if !att.sizeText.isEmpty {
+                            Text(att.sizeText)
+                                .font(.app(10.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+            .padding(.top, 16)
         }
     }
 
