@@ -15,6 +15,8 @@ enum MailBodyRenderer {
         var riskyLinks = 0
         var strippedRemoteImages = 0
         var inlinedImages = 0
+        /// 仍被占位的远程图片 URL（放行按钮按这份清单下载）
+        var remoteImageURLs: [String] = []
         var truncated = false
     }
 
@@ -29,9 +31,10 @@ enum MailBodyRenderer {
 
     static func prepare(rawHTML: String,
                         inlineImages: [String: Data],
+                        loadedRemote: [String: Data] = [:],
                         fontPoints: CGFloat,
                         dark: Bool) -> Prepared? {
-        guard let sanitized = HTMLSanitizer.sanitize(rawHTML) else { return nil }
+        guard let sanitized = HTMLSanitizer.sanitize(rawHTML, loadedRemote: loadedRemote) else { return nil }
         guard let doc = try? SwiftSoup.parseBodyFragment(sanitized.html) else { return nil }
         guard let body = doc.body() else { return nil }
 
@@ -41,7 +44,7 @@ enum MailBodyRenderer {
                 let src = (try? img.attr("src")) ?? ""
                 guard src.lowercased().hasPrefix("cid:") else { continue }
                 let cid = String(src.dropFirst(4))
-                if let data = inlineImages[cid], let mime = imageMIMEType(data) {
+                if let data = inlineImages[cid], let mime = HTMLSanitizer.imageMIMEType(data) {
                     _ = try? img.attr("src", "data:\(mime);base64,\(data.base64EncodedString())")
                     inlined += 1
                 } else {
@@ -65,6 +68,7 @@ enum MailBodyRenderer {
             riskyLinks: sanitized.riskyLinks,
             strippedRemoteImages: sanitized.strippedRemoteImages,
             inlinedImages: inlined,
+            remoteImageURLs: sanitized.remoteImageURLs,
             truncated: sanitized.truncated
         )
     }
@@ -116,27 +120,6 @@ enum MailBodyRenderer {
         </head>
         <body><div class="mp-body">\(bodyHTML)</div></body></html>
         """
-    }
-
-    // MARK: - 图片格式嗅探
-
-    /// 只认常见位图。SVG 一律不认——SVG 里可以塞脚本，邮件场景没有非用 SVG 不可的。
-    static func imageMIMEType(_ data: Data) -> String? {
-        let bytes = [UInt8](data.prefix(12))
-        if bytes.count >= 4, bytes[0] == 0x89, bytes[1] == 0x50, bytes[2] == 0x4E, bytes[3] == 0x47 {
-            return "image/png"
-        }
-        if bytes.count >= 3, bytes[0] == 0xFF, bytes[1] == 0xD8, bytes[2] == 0xFF {
-            return "image/jpeg"
-        }
-        if bytes.count >= 4, bytes[0] == 0x47, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x38 {
-            return "image/gif"
-        }
-        if bytes.count >= 12, bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46,
-           bytes[8] == 0x57, bytes[9] == 0x45, bytes[10] == 0x42, bytes[11] == 0x50 {
-            return "image/webp"
-        }
-        return nil
     }
 }
 

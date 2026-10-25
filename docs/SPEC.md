@@ -1,6 +1,6 @@
 # MailPilot Native — 规格与实现状态
 
-> 2026-10-25 12:00 更新。原生 macOS App，SwiftUI + Liquid Glass。
+> 2026-10-25 13:00 更新。原生 macOS App，SwiftUI + Liquid Glass。
 
 ## 1. 产品定义
 
@@ -98,8 +98,9 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **AI 问答浮层 AskBar**（0.2.37）：Markdown 渲染（`MarkdownText`，按行切块 + `AttributedString` 行内样式）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。`MarkdownText` 的 `inline()` 返回 `some View`（`Text.textSelection` 不返回 Text）
 - **AI 问答空响应自愈**（0.2.37）：reasoning 模型 `content` 为空时自动重试一次（`tool_choice: none` + 要求直接回答），仍空则抛 `AIError.emptyResponse(diagnostic)`，诊断含 finish_reason / 是否只思考 / completion_tokens；Anthropic `max_tokens` 提到 4096
 - **邮件正文 HTML 渲染**（0.2.38）：阅读页新增 WKWebView 渲染管线，`EmlxParser` 保留 text/html 原文与带 Content-ID 的内联图片（读上限 800KB → 2MB）。三层防线：`HTMLSanitizer`（Swift 白名单，设计移植自 K-9 Mail，Apache-2.0）管结构与协议 → CSP meta（`default-src 'none'; img-src data:`）管零外联 → DOMPurify（`atDocumentStart` 注入，双许可）管 mXSS；任一环失败整体退回纯文本。链接策略：普通 http/https 直接开系统浏览器，四种危险特征（可见文字域名与实际目标不符 / `brand.com@evil.com` @ 伪装 / punycode 或西里尔希腊混用同形字 / 裸 IP）弹确认展示真实地址，`javascript:` 等危险协议降级为不可点文本。WKWebView 加固：nonPersistent data store、弹窗全掐死、导航 100% 经 App 拦截。cid 图片 App 侧转 data URI（魔法字节定格式，SVG 不认，≤2MB/张、≤30 张）。**域名判定必须从 href 原文解析**——`URL.host` 会把中文域名规范化成 punycode，直接用它会把所有中文域名误判为「易混淆编码」（实测踩坑）。正文字号经 zoom 整体缩放 + calc 补偿联动。方案调研与威胁模型见 `docs/邮件正文HTML渲染方案调研.md`
-- **演示数据正规化**（0.2.38）：五个账号统一人设地址（清除 `me@` 与 example.com 占位）；iCloud 收件箱新增 HTML 演示邮件（cid logo + 正常外链 + 会被拦截的追踪像素），演示模式下即可验证渲染全链路
+- **演示数据正规化**（0.2.38）：五个账号统一人设地址（清除 `me@` 与 example.com 占位）；iCloud 收件箱新增 HTML 演示邮件（cid logo + 正常外链 + 会被拦截的远程题图），演示模式下即可验证渲染全链路；0.2.39 扩充英 / 法 / 俄三封 HTML 演示邮件（五常国家语言全覆盖）
 - **侧边栏账号行防重名**（0.2.38）：账号名与服务商同名时退回显示邮箱名前缀（真实用户也常把账号命名成 "Gmail"）
+- **HTML 远程图片放行**（0.2.39）：外观设置新增三档策略（始终阻止 / 每次询问 / 总是加载）。放行也走 App 代理下载（`RemoteImageLoader`：ephemeral session、≤2MB/张、≤8MB/次、≤30 张、image/* + 魔法字节复核），转 data URI 后进 WebView——**CSP 不放开，WebView 始终零外联**。`HTMLSanitizer` 的 img src 协议白名单放行 http(s) 是故意的：由遍历层确定性地换占位并记录 URL 清单（白名单若提前剥掉 src 就拿不到 URL 了）
 
 部分完成 / 有已知缺陷：
 
@@ -112,7 +113,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 - **AI 批量处理交互**：`moveToTrash` 已可被 AI 调用（带确认），但「按提示找邮件 → 确认批量处理」的完整体验还没做
 - 附件保存、规则、归档、会话视图
-- ~~**邮件正文渲染**~~（0.2.38 已实现，见「已完成」节；**遗留**：远程图片「加载图片」按钮与设置三档未做，当前只能看「[远程图片]」占位）
+- ~~**邮件正文渲染**~~（0.2.38 已实现，含 0.2.39 远程图片放行，见「已完成」节）
 - **本地模型预检（方案B，已评估未实现）**：用本地小模型给邮件打「敏感度 1-10」，高分时把处置从 redact 升级为 confirm/deny。路线首选 macOS 26 的 Foundation Models（`LanguageModelSession`），次选 MLX Swift；llama.cpp 因 0.5B CPU 推理 10-20 token/s、1000 token 邮件要 1 分钟+，不适合交互场景。**小模型只打分、不改写正文**
 - **补开工具**：`markRead` / `setFlag`（需扩展 `MailStore` 协议，可能要借道 AppleScript）、`saveDraft` / `sendMessage`
 - **MCP Server**：把同一套 `MailTool` 用 MCP 协议导出，让外部客户端（Claude Desktop 等）连接。tool calling 是共用地基，此项是薄适配层

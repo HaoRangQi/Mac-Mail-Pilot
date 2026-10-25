@@ -228,6 +228,33 @@ enum ReaderLineSpacing: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// HTML 邮件远程图片策略。远程图片是跟踪像素与已读回执的主要通道，默认阻止；
+/// 「总是加载」也走 App 代理 fetch（限大小/限类型），WebView 始终零外联
+enum RemoteImagePolicy: String, Codable, CaseIterable, Identifiable {
+    case block, ask, allow
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .block: return "始终阻止"
+        case .ask: return "每次询问"
+        case .allow: return "总是加载"
+        }
+    }
+
+    var help: String {
+        switch self {
+        case .block:
+            return "所有远程图片一律替换为占位，不发起任何网络请求。跟踪像素与已读回执都发不出去"
+        case .ask:
+            return "默认替换为占位，正文顶部显示「加载图片」按钮，由你决定这封图不图"
+        case .allow:
+            return "打开邮件时自动加载远程图片。仍由 App 代理下载（限 2MB/张、限图片格式），WebView 不直接出网"
+        }
+    }
+}
+
 /// 背景图铺法
 enum BackgroundFill: String, Codable, CaseIterable, Identifiable {
     case fill, fit
@@ -260,6 +287,8 @@ struct UISettings: Codable, Equatable {
     var backdrop: UIBackdrop = .standard
     var readerSize: ReaderFontSize = .standard
     var readerSpacing: ReaderLineSpacing = .standard
+    /// HTML 邮件远程图片策略（默认阻止）
+    var remoteImages: RemoteImagePolicy = .block
 
     /// 自定义强调色（0xRRGGBB）。只有 `accent == .custom` 时才生效
     var customAccentHex: UInt32 = 0x46734F
@@ -284,6 +313,7 @@ struct UISettings: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case scale, fontFamily, accent, density, panelWidth, backdrop
         case readerSize, readerSpacing
+        case remoteImages
         case backgroundPath, backgroundSource, backgroundBlur, backgroundDim, backgroundFill
         case customAccentHex
     }
@@ -298,6 +328,7 @@ struct UISettings: Codable, Equatable {
         backdrop = try c.decodeIfPresent(UIBackdrop.self, forKey: .backdrop) ?? .standard
         readerSize = try c.decodeIfPresent(ReaderFontSize.self, forKey: .readerSize) ?? .standard
         readerSpacing = try c.decodeIfPresent(ReaderLineSpacing.self, forKey: .readerSpacing) ?? .standard
+        remoteImages = try c.decodeIfPresent(RemoteImagePolicy.self, forKey: .remoteImages) ?? .block
         backgroundPath = try c.decodeIfPresent(String.self, forKey: .backgroundPath) ?? ""
         backgroundSource = try c.decodeIfPresent(String.self, forKey: .backgroundSource) ?? ""
         backgroundBlur = try c.decodeIfPresent(Double.self, forKey: .backgroundBlur) ?? 16
@@ -333,6 +364,8 @@ enum UIState {
     static var backdropOpacity: Double { current.backdrop.opacity }
     static var readerFontSize: CGFloat { current.readerSize.points }
     static var readerLineSpacing: CGFloat { current.readerSpacing.points }
+    /// HTML 邮件远程图片策略。`current` 快照由 store didSet 刷新，改设置会触发重绘
+    static var remoteImagePolicy: RemoteImagePolicy { current.remoteImages }
 
     // 背景图
     static var backgroundPath: String { current.backgroundPath }

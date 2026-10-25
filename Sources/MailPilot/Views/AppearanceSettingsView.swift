@@ -485,6 +485,17 @@ struct AppearanceSettingsView: View {
                         width: 260
                     )
                 }
+
+                divider
+
+                row("HTML 远程图片", hint: "远程图片会携带你的 IP 与已读状态，默认阻止；内联图片不受影响") {
+                    SegmentedChoice(
+                        options: RemoteImagePolicy.allCases,
+                        label: { $0.label },
+                        value: binding(\.remoteImages),
+                        width: 300
+                    )
+                }
             }
         }
     }

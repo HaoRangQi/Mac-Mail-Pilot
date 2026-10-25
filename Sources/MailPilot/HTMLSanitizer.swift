@@ -18,12 +18,16 @@ enum HTMLSanitizer {
         var riskyLinks = 0
         /// 远程图片被换成占位的数量
         var strippedRemoteImages = 0
+        /// 被剥成占位的远程图片 URL（去重、按文档序）。远程图片放行时按这份清单代理下载
+        var remoteImageURLs: [String] = []
         var truncated = false
     }
 
     static let maxHTMLBytes = 2_000_000
     static let maxElements = 4_000
     static let maxStyleLength = 2_000
+    /// 远程图片放行清单上限。超过的保留占位，不进下载队列
+    static let maxRemoteImages = 30
 
     /// 邮件排版需要的标签。表单/脚本/框架/元信息类一律不要——
     /// `<form>` + `<input type=password>` 是邮件里最常见的钓鱼道具。
@@ -47,7 +51,7 @@ enum HTMLSanitizer {
         "behavior", "-moz-binding", "expression",
     ]
 
-    static func sanitize(_ raw: String) -> Result? {
+    static func sanitize(_ raw: String, loadedRemote: [String: Data] = [:]) -> Result? {
         var source = raw
         var truncated = false
         if source.utf8.count > maxHTMLBytes {
@@ -118,11 +122,22 @@ enum HTMLSanitizer {
                 }
             }
 
-            // 3) 图片：cid 留给渲染层转 data URI，data:image 放行，其余一律占位
+            // 3) 图片：cid 留给渲染层转 data URI，data:image 放行，其余一律占位。
+            //    已被用户放行的远程图（loadedRemote）直接转 data URI——URL 清单留给没放行的
             if tag == "img" {
-                let src = ((try? element.attr("src")) ?? "").lowercased()
+                let original = (try? element.attr("src")) ?? ""
+                let src = original.lowercased()
                 if src.hasPrefix("cid:") { continue }
                 if src.hasPrefix("data:image/") { continue }
+                if src.hasPrefix("http://") || src.hasPrefix("https://") {
+                    if let data = loadedRemote[original], let mime = imageMIMEType(data) {
+                        _ = try? element.attr("src", "data:\(mime);base64,\(data.base64EncodedString())")
+                        continue
+                    }
+                    if result.remoteImageURLs.count < maxRemoteImages, !result.remoteImageURLs.contains(original) {
+                        result.remoteImageURLs.append(original)
+                    }
+                }
                 _ = try? element.removeAttr("src")
                 let alt = (try? element.attr("alt")) ?? ""
                 _ = try? element.text(alt.isEmpty ? "[远程图片]" : "[远程图片] \(alt)")
@@ -150,9 +165,12 @@ enum HTMLSanitizer {
         }
         safelist = try safelist.addAttributes("a", "href")
         safelist = try safelist.addAttributes("img", "src", "alt")
-        // href 只放行这四个协议；img 的 src 只放行 cid 与 data（其余交给上面的遍历剥）
+        // href 只放行这四个协议。
+        // img 的 src 放行 cid/data/http/https——http(s) 不是漏放：下面的遍历会
+        // **确定性地**把每个非 cid/data 的 img 换成占位并记下 URL（远程图片放行清单）。
+        // 白名单若在这里就剥掉 src，遍历时就拿不到原始 URL 了
         safelist = try safelist.addProtocols("a", "href", "http", "https", "mailto", "tel")
-        safelist = try safelist.addProtocols("img", "src", "cid", "data")
+        safelist = try safelist.addProtocols("img", "src", "cid", "data", "http", "https")
         return safelist
     }
 
@@ -239,5 +257,27 @@ enum HTMLSanitizer {
         allowed.remove("+")
         allowed.remove("#")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+
+    // MARK: - 图片格式嗅探
+
+    /// 只认常见位图。SVG 一律不认——SVG 里可以塞脚本，邮件场景没有非用 SVG 不可的。
+    /// 服务端声明 Content-Type 可能是假的，魔法字节才是唯一依据
+    static func imageMIMEType(_ data: Data) -> String? {
+        let bytes = [UInt8](data.prefix(12))
+        if bytes.count >= 4, bytes[0] == 0x89, bytes[1] == 0x50, bytes[2] == 0x4E, bytes[3] == 0x47 {
+            return "image/png"
+        }
+        if bytes.count >= 3, bytes[0] == 0xFF, bytes[1] == 0xD8, bytes[2] == 0xFF {
+            return "image/jpeg"
+        }
+        if bytes.count >= 4, bytes[0] == 0x47, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x38 {
+            return "image/gif"
+        }
+        if bytes.count >= 12, bytes[0] == 0x52, bytes[1] == 0x49, bytes[2] == 0x46, bytes[3] == 0x46,
+           bytes[8] == 0x57, bytes[9] == 0x45, bytes[10] == 0x42, bytes[11] == 0x50 {
+            return "image/webp"
+        }
+        return nil
     }
 }

@@ -275,7 +275,9 @@ final class DemoStore: MailStore {
                 """,
                 unread: true,
                 // 演示 HTML 渲染：table 布局 + 内联样式（典型周刊邮件）、
-                // cid 内联 logo、正常外链，以及一张会被默认拦截的远程追踪像素
+                // cid 内联 logo、正常外链，以及一张会被默认拦截的远程题图
+                // （placehold.co 真实可达——策略改成「每次询问/总是加载」点加载能看到图；
+                //  之前用 640×1 细线，加载了也看不见，不像话）
                 htmlBody: """
                 <html><body style="margin:0;padding:0;background:#f4f4f6;">
                 <table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f6"><tr><td align="center" style="padding:24px 12px;">
@@ -299,7 +301,7 @@ final class DemoStore: MailStore {
                     </td></tr>
                   </table>
                   <p style="margin:18px 0 16px 0;font-size:13px;color:#8a8a8e;">约 25 分钟读完。</p>
-                  <img src="https://track.shenduweekly.com/open?id=42&amp;u=87341265" width="1" height="1" alt="" style="display:block;border:0;">
+                  <img src="https://placehold.co/600x200/1d357a/ffffff.png?text=%E6%B7%B1%E8%AF%BB%E5%91%A8%E5%88%8A&u=87341265" width="600" height="200" alt="深读周刊 · 第 42 期" style="display:block;border:0;max-width:100%;height:auto;">
                 </td></tr>
                 <tr><td style="padding:16px 36px 28px 36px;border-top:1px solid #ececee;">
                   <p style="margin:0;font-size:12px;color:#a0a0a5;">深读周刊 · 每周一发送 · <a href="https://shenduweekly.com/unsubscribe" style="color:#a0a0a5;">退订</a></p>
@@ -318,6 +320,46 @@ final class DemoStore: MailStore {
                 sender: "我", senderEmail: "wangchen@icloud.com",
                 date: ago(140), preview: "相册已经建好了，把你们都加进去了，链接在下面……",
                 body: "相册已经建好了，把你们都加进去了。"
+            ),
+
+            Message(
+                id: "msg-013", accountID: "acc-icloud", mailboxID: "mb-icloud-inbox",
+                subject: "Invitation : petit-déjeuner découverte — mardi 4 novembre",
+                sender: "Camille Dubois", senderEmail: "camille.dubois@atelier-lumiere.fr",
+                recipients: ["wangchen@icloud.com"],
+                date: ago(30),
+                preview: "Bonjour, nous organisons un petit-déjeuner découverte le mardi 4 novembre à Lyon……",
+                body: """
+                Bonjour,
+
+                Nous organisons un petit-déjeuner découverte le mardi 4 novembre, de 9h à 11h, dans nos locaux de Lyon.
+
+                Au programme : présentation de la nouvelle collection, échange avec l'équipe et visite de l'atelier.
+
+                Merci de confirmer votre présence avant le 28 octobre.
+
+                Camille Dubois
+                Atelier Lumière · Lyon
+                """,
+                unread: true,
+                htmlBody: """
+                <html><body style="margin:0;padding:0;background:#fdfbf7;">
+                <div style="max-width:560px;margin:0 auto;padding:28px 22px;font-family:Georgia,'Times New Roman',serif;font-size:15px;line-height:1.65;color:#2b2b28;">
+                  <p style="margin:0 0 6px 0;font-size:12px;letter-spacing:2px;color:#a08c5b;text-transform:uppercase;">Atelier Lumière · Lyon</p>
+                  <h2 style="margin:0 0 14px 0;font-size:20px;font-weight:600;color:#2b2b28;">Petit-déjeuner découverte</h2>
+                  <p style="margin:0 0 14px 0;">Bonjour,</p>
+                  <p style="margin:0 0 14px 0;">Nous organisons un petit-déjeuner découverte le <strong>mardi 4 novembre</strong>, de 9h à 11h, dans nos locaux de Lyon.</p>
+                  <p style="margin:0 0 6px 0;">Au programme :</p>
+                  <ul style="margin:0 0 14px 0;padding-left:20px;">
+                    <li style="margin-bottom:4px;">Présentation de la nouvelle collection</li>
+                    <li style="margin-bottom:4px;">Échange avec l'équipe</li>
+                    <li style="margin-bottom:4px;">Visite de l'atelier</li>
+                  </ul>
+                  <p style="margin:0 0 18px 0;">Merci de confirmer votre présence avant le 28 octobre.</p>
+                  <p style="margin:0;"><a href="https://atelier-lumiere.fr/rsvp/4-novembre" style="color:#a08c5b;">Confirmer ma présence</a></p>
+                </div>
+                </body></html>
+                """
             ),
 
             // ---- Gmail ----
@@ -350,6 +392,49 @@ final class DemoStore: MailStore {
                 sender: "我", senderEmail: "wangchen@gmail.com",
                 date: ago(60), preview: "周六早上七点在山脚集合？我带水。",
                 body: "周六早上七点在山脚集合？我带水。"
+            ),
+
+            // ---- 五常国家语言演示邮件：英 / 法 / 俄（中文已有）----
+            Message(
+                id: "msg-024", accountID: "acc-gmail", mailboxID: "mb-gmail-inbox",
+                subject: "Re: Q4 equipment order — revised quotation and delivery dates",
+                sender: "James Whitfield", senderEmail: "j.whitfield@acme-corp.com",
+                recipients: ["wangchen@gmail.com"],
+                date: ago(6),
+                preview: "Dear Wang, thanks for the revised quotation. Could you confirm the delivery schedule for the 200-unit order and whether the 60-day payment terms still hold?……",
+                body: """
+                Dear Wang,
+
+                Thanks for the revised quotation — the tiered pricing works for us.
+
+                Two things to confirm before we sign:
+                1. Can you hold the 200-unit price until the end of November?
+                2. The delivery schedule: you mentioned six weeks after deposit. Could we split it into two shipments (100 units in week 4, the rest in week 6)?
+
+                Our legal team has reviewed the draft contract and left comments on the liability clause only.
+
+                Best regards,
+                James Whitfield
+                Acme Corp · Procurement
+                """,
+                unread: true, needsReply: true, threadID: "th-acme-q4",
+                htmlBody: """
+                <html><body style="margin:0;padding:0;background:#ffffff;">
+                <div style="max-width:600px;margin:0 auto;padding:24px 20px;font-family:-apple-system,'Helvetica Neue',sans-serif;font-size:14px;line-height:1.6;color:#1d1d1f;">
+                  <p style="margin:0 0 14px 0;">Dear Wang,</p>
+                  <p style="margin:0 0 14px 0;">Thanks for the revised quotation — the tiered pricing works for us.</p>
+                  <p style="margin:0 0 8px 0;">Two things to confirm before we sign:</p>
+                  <ol style="margin:0 0 14px 0;padding-left:22px;">
+                    <li style="margin-bottom:6px;">Can you hold the 200-unit price until the end of November?</li>
+                    <li style="margin-bottom:6px;">The delivery schedule: you mentioned six weeks after deposit. Could we split it into two shipments (100 units in week 4, the rest in week 6)?</li>
+                  </ol>
+                  <p style="margin:0 0 14px 0;">Our legal team has reviewed the draft contract and left comments on the <strong>liability clause</strong> only.</p>
+                  <p style="margin:0 0 4px 0;">Best regards,</p>
+                  <p style="margin:0 0 16px 0;"><strong>James Whitfield</strong><br><span style="color:#8a8a8e;">Acme Corp · Procurement</span></p>
+                  <p style="margin:0;"><a href="https://acme-corp.com/orders/q4-200" style="color:#0a68c6;">View the order summary</a></p>
+                </div>
+                </body></html>
+                """
             ),
 
             // ---- Outlook ----
@@ -398,6 +483,44 @@ final class DemoStore: MailStore {
                 sender: "我", senderEmail: "87341265@qq.com",
                 date: ago(100), preview: "域名已经续了三年，发票稍后发你。",
                 body: "域名已经续了三年，发票稍后发你。"
+            ),
+            Message(
+                id: "msg-043", accountID: "acc-qq", mailboxID: "mb-qq-inbox",
+                subject: "Обновление по поставке оборудования — IV квартал",
+                sender: "Анна Соколова", senderEmail: "a.sokolova@technoimport.ru",
+                recipients: ["87341265@qq.com"],
+                date: ago(48),
+                preview: "Добрый день! Уточнили график поставки на IV квартал……",
+                body: """
+                Добрый день!
+
+                Уточнили график поставки на IV квартал:
+
+                · Первая партия (100 единиц) — 15 ноября
+                · Вторая партия (100 единиц) — 29 ноября
+
+                Просим подтвердить даты до 1 ноября, чтобы мы забронировали производственные мощности.
+
+                С уважением,
+                Анна Соколова
+                ТехноИмпорт · Отдел продаж
+                """,
+                unread: true, needsReply: true,
+                htmlBody: """
+                <html><body style="margin:0;padding:0;">
+                <div style="max-width:600px;margin:0 auto;padding:22px 20px;font-family:-apple-system,'Helvetica Neue',sans-serif;font-size:14px;line-height:1.6;color:#1d1d1f;">
+                  <p style="margin:0 0 14px 0;">Добрый день!</p>
+                  <p style="margin:0 0 10px 0;">Уточнили график поставки на IV квартал:</p>
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 14px 0;border:1px solid #e5e5ea;border-radius:8px;">
+                    <tr><td style="padding:10px 14px;border-bottom:1px solid #e5e5ea;">Первая партия (100 единиц)</td><td style="padding:10px 14px;border-bottom:1px solid #e5e5ea;text-align:right;white-space:nowrap;">15 ноября</td></tr>
+                    <tr><td style="padding:10px 14px;">Вторая партия (100 единиц)</td><td style="padding:10px 14px;text-align:right;white-space:nowrap;">29 ноября</td></tr>
+                  </table>
+                  <p style="margin:0 0 14px 0;">Просим подтвердить даты до <strong>1 ноября</strong>, чтобы мы забронировали производственные мощности.</p>
+                  <p style="margin:0 0 4px 0;">С уважением,</p>
+                  <p style="margin:0;"><strong>Анна Соколова</strong><br><span style="color:#8a8a8e;">ТехноИмпорт · Отдел продаж</span></p>
+                </div>
+                </body></html>
+                """
             ),
         ]
     }
