@@ -11,6 +11,8 @@
     </array>
     <key>CFBundleExecutable</key>
     <string>MailPilot</string>
+    <key>CFBundleIconFile</key>
+    <string>MailPilot</string>
     <key>CFBundleIdentifier</key>
     <string>com.mailpilot.native</string>
     <key>CFBundleInfoDictionaryVersion</key>
