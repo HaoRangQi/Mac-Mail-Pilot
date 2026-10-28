@@ -267,6 +267,39 @@ let openScope = AskScopeStore(inner: scopeStore, scope: AskScope(window: nil, ac
 let openHits = (try? await openScope.search("合同", limit: 10)) ?? []
 check(openHits.count == 3, "不限范围时三封都能搜到")
 
+// MARK: - 9. 问答历史回放的上锁核对
+
+print("\n[9] 历史回放")
+// 用一套干净的状态，避免前面几节留下的锁影响断言
+let replayGuards = MailGuardStore()
+replayGuards.clearAll()
+replayGuards.setLocked(true, for: secret)
+
+check(replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: true, citations: []),
+      "没读过邮件的轮次可以回放（账号未锁）")
+check(!replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: true,
+                                     citations: [(key: "<m2@x>", accountID: "acc-a")]),
+      "引用里含已上锁邮件 → 不回放")
+check(replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: true,
+                                    citations: [(key: "<m1@x>", accountID: "acc-a")]),
+      "引用全是未锁邮件 → 可回放")
+check(!replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: false, citations: []),
+      "老记录（无引用清单）+ 存在邮件锁 → 不回放")
+
+replayGuards.setAccountLocked(true, id: "acc-b")
+check(!replayGuards.canReplayHistory(accountIDs: ["acc-b"], citationsTracked: true, citations: []),
+      "账号上锁 → 该账号的轮次不回放")
+check(!replayGuards.canReplayHistory(accountIDs: nil, citationsTracked: true, citations: []),
+      "「所有账号」+ 有账号上锁 → 不回放")
+check(replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: true, citations: []),
+      "其他未锁账号的轮次不受影响")
+replayGuards.setAccountLocked(false, id: "acc-b")
+check(replayGuards.canReplayHistory(accountIDs: nil, citationsTracked: true, citations: []),
+      "账号解锁后「所有账号」恢复回放")
+replayGuards.setLocked(false, for: secret)
+check(replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: false, citations: []),
+      "没有任何锁时老记录照常回放")
+
 // MARK: - 结果
 
 print("\n========================================")

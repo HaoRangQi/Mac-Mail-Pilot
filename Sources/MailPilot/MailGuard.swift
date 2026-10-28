@@ -111,6 +111,48 @@ final class MailGuardStore: ObservableObject {
         save()
     }
 
+    // MARK: - 问答历史回放
+
+    /// 一轮问答历史能否回放给**不可信**模型。
+    ///
+    /// 为什么要按「当前」的锁重新核对：用户可能在上次问答之后才锁了某封邮件，
+    /// 上一轮的回答里就可能带着它的内容。脱敏按规则走，管不了访问控制。
+    /// 原则是**证明不了安全就不带**——历史里的一句原话，可能就是今天才上锁的那封。
+    ///
+    /// 抽在这里而不是 AppModel：只依赖守卫状态，测试不必拉起整个 App。
+    /// - Parameters:
+    ///   - accountIDs: 这轮当时选的账号；nil = 所有账号
+    ///   - citationsTracked: 这轮是否记录了完整引用清单（老记录没有）
+    ///   - citations: 引用邮件的（守卫键 Message-ID, 账号 ID）
+    func canReplayHistory(accountIDs: [String]?,
+                          citationsTracked: Bool,
+                          citations: [(key: String?, accountID: String?)]) -> Bool {
+        // 1. 账号级：这轮的范围里现在有上锁的账号 → 答案可能带过它的邮件或元信息
+        if let accountIDs {
+            if accountIDs.contains(where: { isAccountLocked($0) }) { return false }
+        } else if lockedAccountCount > 0 {
+            // nil = 「所有账号」；老记录也解不出这个字段，只能按最严处理
+            return false
+        }
+
+        // 2. 没有引用清单的老记录：只要现在有邮件锁，就无法证明答案没引用过它
+        if !citationsTracked {
+            return lockedMessageCount == 0
+        }
+
+        // 3. 逐条核对引用：账号锁或邮件锁任一命中都不带
+        for citation in citations {
+            if let accountID = citation.accountID, isAccountLocked(accountID) { return false }
+            if let key = citation.key {
+                if messages[key]?.level == .locked { return false }
+            } else if lockedMessageCount > 0 {
+                // 老引用没有守卫键，同样证明不了
+                return false
+            }
+        }
+        return true
+    }
+
     func clearMessages() {
         messages.removeAll()
         save()

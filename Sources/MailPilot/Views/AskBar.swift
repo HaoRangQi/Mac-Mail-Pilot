@@ -427,6 +427,19 @@ struct AskBar: View {
                         .lineLimit(1)
                 }
 
+                // 历史被锁挡下时要说一声，否则模型「突然失忆」用户只会觉得坏了
+                if let skipped = turn.historySkipped, skipped > 0 {
+                    Text("·")
+                        .font(.app(10.5))
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "lock.fill")
+                        .font(.app(9))
+                        .foregroundStyle(Theme.gold)
+                    Text("略过 \(skipped) 轮历史")
+                        .font(.app(10.5))
+                        .lineLimit(1)
+                }
+
                 Spacer(minLength: 4)
                 Text(stamp(turn.date))
                     .font(.app(10.5))

@@ -134,6 +134,8 @@ struct AskOutcome {
     var citations: [AskCitation] = []
     /// 本轮累计 token（输入 + 输出）。拿不到就是 0，界面不显示
     var tokens: Int = 0
+    /// 因上锁被挡在上下文之外的历史轮数。静默丢历史会让模型「突然失忆」，必须让用户看见
+    var historySkipped: Int = 0
 }
 
 /// 回答引用到的一封邮件。只存展示需要的字段，历史记录才不至于臃肿
@@ -142,6 +144,10 @@ struct AskCitation: Codable, Hashable, Identifiable {
     var subject: String
     var sender: String
     var date: Date
+    /// 上锁判定的键（Message-ID）。老记录没有这个字段，按「无法验证」处理
+    var guardKey: String? = nil
+    /// 邮件所属账号，用于判断账号级上锁
+    var accountID: String? = nil
 }
 
 struct AskTurn: Identifiable, Codable, Hashable {
@@ -160,27 +166,40 @@ struct AskTurn: Identifiable, Codable, Hashable {
     var citations: [AskCitation] = []
     /// 本轮消耗的 token。成本看不见就会失控，哪怕只是个量级也得露出来
     var tokens: Int? = nil
+    /// 本轮提问时选择的账号 ID；nil = 所有账号。回放历史时要按**当前**的锁重新核对
+    var accountIDs: [String]? = nil
+    /// 这一版起 `citations` 是完整记录（没读过邮件就是空数组）。
+    /// 老记录没有这个标记，无法证明答案里没引用过后来才上锁的邮件
+    var citationsTracked: Bool = false
+    /// 本轮因上锁没带上的历史轮数（只在气泡上展示，不参与请求）
+    var historySkipped: Int? = nil
 
     init(id: String = UUID().uuidString,
          question: String,
          answer: String,
          date: Date = Date(),
          accounts: [String] = [],
+         accountIDs: [String]? = nil,
          redactions: [Redactor.Mapping] = [],
          range: String? = nil,
          scanned: Int? = nil,
          citations: [AskCitation] = [],
-         tokens: Int? = nil) {
+         tokens: Int? = nil,
+         citationsTracked: Bool = false,
+         historySkipped: Int? = nil) {
         self.id = id
         self.question = question
         self.answer = answer
         self.date = date
         self.accounts = accounts
+        self.accountIDs = accountIDs
         self.redactions = redactions
         self.range = range
         self.scanned = scanned
         self.citations = citations
         self.tokens = tokens
+        self.citationsTracked = citationsTracked
+        self.historySkipped = historySkipped
     }
 
     /// 旧版本存的历史里没有 `redactions`，缺字段按空处理——
@@ -197,6 +216,9 @@ struct AskTurn: Identifiable, Codable, Hashable {
         scanned = try container.decodeIfPresent(Int.self, forKey: .scanned)
         citations = try container.decodeIfPresent([AskCitation].self, forKey: .citations) ?? []
         tokens = try container.decodeIfPresent(Int.self, forKey: .tokens)
+        accountIDs = try container.decodeIfPresent([String].self, forKey: .accountIDs)
+        citationsTracked = try container.decodeIfPresent(Bool.self, forKey: .citationsTracked) ?? false
+        historySkipped = try container.decodeIfPresent(Int.self, forKey: .historySkipped)
     }
 }
 
@@ -1917,7 +1939,10 @@ final class AppModel: ObservableObject {    // 数据
 
         // 先把提问落进历史：调用失败也要留下这一笔。
         // 只弹一个 alert 的话，用户输入的这段话等于从没存在过，也没法重跑
-        let turn = AskTurn(question: text, answer: "", accounts: askScopeNames, range: rangeLabel)
+        let turn = AskTurn(question: text, answer: "",
+                           accounts: askScopeNames,
+                           accountIDs: askAllAccounts ? nil : Array(askAccounts),
+                           range: rangeLabel)
         askHistory.append(turn)
         persistAsk()
 
@@ -1925,7 +1950,8 @@ final class AppModel: ObservableObject {    // 数据
             let result = try await runAsk(text)
             finishAsk(turn.id, answer: result.answer,
                       redactions: result.redactions, scanned: result.scanned,
-                      citations: result.citations, tokens: result.tokens)
+                      citations: result.citations, tokens: result.tokens,
+                      historySkipped: result.historySkipped)
         } catch {
             let message = "调用失败：\(error.localizedDescription)"
             finishAsk(turn.id, answer: message)
@@ -2054,13 +2080,15 @@ final class AppModel: ObservableObject {    // 数据
         """
 
         let usage = UsageBox()
+        // 历史回放要按**当前**的上锁状态重新过滤：用户可能在上次问答之后才锁了某封邮件
+        let history = askHistoryForModel(trusted: trusted)
         let answer = try await AIService.chatWithTools(
             provider: provider,
             model: model,
             system: system,
             user: text,
             tools: Self.agentTools(trusted: trusted).map { $0.toolSchema },
-            history: askHistoryForModel,
+            history: history.turns,
             usage: usage,
             redaction: redaction,
             onDelta: { [weak self] partial in
@@ -2079,9 +2107,16 @@ final class AppModel: ObservableObject {    // 数据
             redactions: redaction.mappings,
             scanned: scoped.scannedCount,
             citations: scoped.citations.map {
-                AskCitation(id: $0.id, subject: $0.subject, sender: $0.displaySender, date: $0.date)
+                AskCitation(id: $0.id,
+                            subject: $0.subject,
+                            sender: $0.displaySender,
+                            date: $0.date,
+                            // 存下判定用的键与账号：以后回放历史时要按当前的锁重新核对
+                            guardKey: guards.key(for: $0),
+                            accountID: $0.accountID)
             },
-            tokens: usage.total
+            tokens: usage.total,
+            historySkipped: history.skipped
         )
     }
 
@@ -2302,6 +2337,7 @@ final class AppModel: ObservableObject {    // 数据
         // 旧的引用和用量属于上一次回答，重跑时必须一起清掉
         askHistory[index].citations = []
         askHistory[index].tokens = nil
+        askHistory[index].historySkipped = nil
         askBusy = true
         askLiveText = ""
         defer {
@@ -2319,6 +2355,9 @@ final class AppModel: ObservableObject {    // 数据
                 askHistory[current].scanned = result.scanned
                 askHistory[current].citations = result.citations
                 askHistory[current].tokens = result.tokens
+                askHistory[current].accountIDs = askAllAccounts ? nil : Array(askAccounts)
+                askHistory[current].citationsTracked = true
+                askHistory[current].historySkipped = result.historySkipped > 0 ? result.historySkipped : nil
             }
         } catch {
             if let current = askHistory.firstIndex(where: { $0.id == id }) {
@@ -2333,13 +2372,17 @@ final class AppModel: ObservableObject {    // 数据
                            redactions: [Redactor.Mapping] = [],
                            scanned: Int? = nil,
                            citations: [AskCitation] = [],
-                           tokens: Int? = nil) {
+                           tokens: Int? = nil,
+                           historySkipped: Int = 0) {
         if let index = askHistory.firstIndex(where: { $0.id == id }) {
             askHistory[index].answer = answer
             askHistory[index].redactions = redactions
             askHistory[index].scanned = scanned
             askHistory[index].citations = citations
             askHistory[index].tokens = tokens
+            // 从这一版起引用清单是完整记录；以后回放历史时靠它核对上锁状态
+            askHistory[index].citationsTracked = true
+            askHistory[index].historySkipped = historySkipped > 0 ? historySkipped : nil
         }
         persistAsk()
         askBusy = false
@@ -2435,19 +2478,39 @@ final class AppModel: ObservableObject {    // 数据
     /// 交给模型的最近几轮问答。
     ///
     /// 只取有答案的、最多 5 轮、总字数封顶 4000——历史越长越贵，
-    /// 而且它只是「让追问能接上话」，不是让模型复习整场对话
-    private var askHistoryForModel: [(question: String, answer: String)] {
+    /// 而且它只是「让追问能接上话」，不是让模型复习整场对话。
+    ///
+    /// **不可信模型还要按当前的上锁状态过滤**：用户可能在上次问答之后才锁了
+    /// 某封邮件或某个账号，上一轮的回答里就可能带着它的内容。脱敏管不了这个，
+    /// 锁是访问控制，必须单独核对。被挡下几轮要如实告诉用户，不能静默失忆。
+    private func askHistoryForModel(trusted: Bool)
+        -> (turns: [(question: String, answer: String)], skipped: Int) {
         var picked: [(question: String, answer: String)] = []
+        var skipped = 0
         var budget = 4000
         for turn in askHistory.reversed() {
             guard !turn.answer.isEmpty else { continue }
+            guard trusted || historyTurnIsSafe(turn) else {
+                skipped += 1
+                continue
+            }
             let cost = turn.question.count + turn.answer.count
             if cost > budget { break }
             budget -= cost
             picked.append((turn.question, turn.answer))
             if picked.count >= 5 { break }
         }
-        return Array(picked.reversed())
+        return (Array(picked.reversed()), skipped)
+    }
+
+    /// 一轮历史能不能回放给当前（不可信）模型。
+    /// 判定本身在 `MailGuardStore.canReplayHistory`——放那边才能脱离 AppModel 做断言测试。
+    private func historyTurnIsSafe(_ turn: AskTurn) -> Bool {
+        guards.canReplayHistory(
+            accountIDs: turn.accountIDs,
+            citationsTracked: turn.citationsTracked,
+            citations: turn.citations.map { (key: $0.guardKey, accountID: $0.accountID) }
+        )
     }
 
     /// 当前问答的取件窗口；nil 表示用户选了「忽略」，不限时间。
