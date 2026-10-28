@@ -85,20 +85,33 @@ final class MailGuardStore: ObservableObject {
     // MARK: - 设置
 
     func setLocked(_ locked: Bool, for message: Message) {
-        let id = key(for: message)
-        guard !id.isEmpty else { return }
-        if locked {
-            messages[id] = GuardRecord(
-                level: .locked,
-                subject: message.subject,
-                addedAt: Date(),
-                missingSince: nil,
-                pathHint: message.id
-            )
-        } else {
-            messages.removeValue(forKey: id)
+        setLocked(locked, for: [message])
+    }
+
+    /// 批量上锁 / 解锁。**只写一次盘**——多选可能上千封，
+    /// 逐条保存会把 UserDefaults 写成瓶颈。
+    func setLocked(_ locked: Bool, for targets: [Message]) {
+        var dirty = false
+        for message in targets {
+            let id = key(for: message)
+            guard !id.isEmpty else { continue }
+            if locked {
+                // 已锁的保持原记录：别把 addedAt 刷成今天，设置页的排序会乱
+                if messages[id]?.level != .locked {
+                    messages[id] = GuardRecord(
+                        level: .locked,
+                        subject: message.subject,
+                        addedAt: Date(),
+                        missingSince: nil,
+                        pathHint: message.id
+                    )
+                    dirty = true
+                }
+            } else if messages.removeValue(forKey: id) != nil {
+                dirty = true
+            }
         }
-        save()
+        if dirty { save() }
     }
 
     func setAccountLocked(_ locked: Bool, id: String) {

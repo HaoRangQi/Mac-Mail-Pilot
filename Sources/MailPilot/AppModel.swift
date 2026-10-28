@@ -946,6 +946,33 @@ final class AppModel: ObservableObject {    // 数据
         Task { await loadStyleSamples() }
     }
 
+    /// 批量上锁 / 解锁，返回**实际改变可见性**的封数。
+    /// 账号上锁时单封解锁不会生效，提示不能按操作条数报「已解锁 N 封」。
+    @discardableResult
+    func setLocked(_ locked: Bool, for targets: [Message]) -> Int {
+        let before = targets.map { guards.isLocked($0) }
+        guards.setLocked(locked, for: targets)
+        let changed = zip(before, targets).filter { $0.0 != guards.isLocked($0.1) }.count
+        // 可见性没变时写作风格样本也不会变，省一次重算
+        if changed > 0 { Task { await loadStyleSamples() } }
+        return changed
+    }
+
+    /// 多选工具条的「上锁 / 解锁」
+    func lockSelected(_ locked: Bool) {
+        let targets = multiSelectedMessages
+        guard !targets.isEmpty else { return }
+        let changed = setLocked(locked, for: targets)
+        if changed == 0 {
+            showToast(locked ? "所选邮件已全部上锁"
+                             : "所选的邮件仍受账号上锁保护，单封解锁不生效")
+        } else {
+            showToast(locked
+                       ? "已上锁 \(changed) 封，不可信模型将看不到"
+                       : "已解锁 \(changed) 封")
+        }
+    }
+
     func toggleAccountLock(_ account: Account) {
         let locked = !guards.isAccountLocked(account.id)
         guards.setAccountLocked(locked, id: account.id)

@@ -300,6 +300,24 @@ replayGuards.setLocked(false, for: secret)
 check(replayGuards.canReplayHistory(accountIDs: ["acc-a"], citationsTracked: false, citations: []),
       "没有任何锁时老记录照常回放")
 
+// MARK: - 10. 批量上锁
+
+print("\n[10] 批量上锁")
+let batchGuards = MailGuardStore()
+batchGuards.clearAll()
+batchGuards.setLocked(true, for: secret)
+let lockedAt = batchGuards.messages["<m2@x>"]?.addedAt
+
+batchGuards.setLocked(true, for: [normal, secret])
+check(batchGuards.messages["<m1@x>"]?.level == .locked, "批量上锁把未锁的邮件补上")
+check(batchGuards.messages["<m2@x>"]?.level == .locked, "已锁的邮件保持锁定")
+check(batchGuards.messages["<m2@x>"]?.addedAt == lockedAt, "重复上锁不刷新 addedAt（设置页排序不乱）")
+check(batchGuards.lockedMessageCount == 2, "两条记录都在")
+
+batchGuards.setLocked(false, for: [normal, secret, workMail])
+check(batchGuards.lockedMessageCount == 0, "批量解锁清空记录")
+check(batchGuards.messages["<m3@x>"] == nil, "解锁没锁过的邮件不产生副作用")
+
 // MARK: - 结果
 
 print("\n========================================")

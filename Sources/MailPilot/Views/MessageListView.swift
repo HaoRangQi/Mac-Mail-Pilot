@@ -109,16 +109,45 @@ struct MessageListView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.multiSelected.isEmpty)
+
+                // 批量上锁：所选全部已锁时按钮变成解锁，方便原地反悔
+                Button {
+                    model.lockSelected(!allSelectedLocked)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: allSelectedLocked ? "lock.open" : "lock")
+                            .font(.app(9.5, weight: .semibold))
+                        Text(allSelectedLocked ? "解锁" : "上锁")
+                            .font(.app(11.5, weight: .medium))
+                    }
+                    .foregroundStyle(model.multiSelected.isEmpty ? Color.secondary : Color.primary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 24)
+                    .background(Color.primary.opacity(0.05), in: Capsule())
+                    .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.multiSelected.isEmpty)
+                .help(allSelectedLocked
+                      ? "解锁所选邮件"
+                      : "上锁所选邮件：不可信模型看不到，也不参与问答检索与历史回放")
             }
             .padding(.horizontal, 14)
             .frame(height: 44)
         }
     }
 
+    private var allSelectedLocked: Bool {
+        let targets = model.multiSelectedMessages
+        return !targets.isEmpty && targets.allSatisfy { model.isLocked($0) }
+    }
+
     @ViewBuilder
     private func row(_ message: Message, threadCount: Int = 1) -> some View {
         let active = model.selected?.id == message.id
         let picked = model.multiSelected.contains(message.id)
+        let locked = model.isLocked(message)
         Button {
             Task { await model.open(message) }
         } label: {
@@ -183,6 +212,14 @@ struct MessageListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                model.setLocked(!locked, for: message)
+            } label: {
+                Label(locked ? "解锁这封邮件" : "上锁（不可信模型不可见）",
+                      systemImage: locked ? "lock.open" : "lock")
+            }
+        }
     }
 
     static func dateText(_ date: Date) -> String {
