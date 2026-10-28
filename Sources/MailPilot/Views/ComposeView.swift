@@ -325,12 +325,18 @@ struct ComposeView: View {
         form.lastIntent = typed
         form.intent = ""
 
+        let originalBody = form.bodyText
         Task { @MainActor in
             do {
                 let text = try await model.draftComposeBody(
                     intent: intent,
                     subject: subject,
-                    currentBody: currentBody
+                    currentBody: currentBody,
+                    onDelta: { partial in
+                        // 空串是「重新开始流式」的信号，别把用户原来的正文清掉
+                        guard !partial.isEmpty else { return }
+                        Task { @MainActor in form.bodyText = partial }
+                    }
                 )
                 form.bodyText = text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !hasText {
@@ -340,6 +346,8 @@ struct ComposeView: View {
                 }
             } catch {
                 form.aiError = error.localizedDescription
+                // 流式可能已经把正文改成半截了：失败就恢复原文，别让用户以为自己删了
+                form.bodyText = originalBody
                 // 失败时把要求放回输入框，省得重打
                 form.intent = typed
                 form.lastIntent = ""

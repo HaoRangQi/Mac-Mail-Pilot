@@ -277,6 +277,8 @@ final class AppModel: ObservableObject {    // 数据
     @Published var showAsk = false
     @Published var askText = ""
     @Published var askBusy = false
+    /// 流式回答的半成品。只用于「最新一条还在生成」时显示，不进历史、不落盘
+    @Published var askLiveText = ""
     @Published var askAllAccounts = false
     @Published var askAccounts: Set<String> = []
     @Published var askHistory: [AskTurn] = []
@@ -806,7 +808,10 @@ final class AppModel: ObservableObject {    // 数据
     /// 不含任何邮件正文，所以不走「邮件内容外发」的确认流程——用户点「AI 起草」
     /// 本身就是明确的外发意图，再弹一次确认只是噪音。
     /// 但模型不可信时仍然先脱敏：规则一致，只是不打断。
-    func draftComposeBody(intent: String, subject: String, currentBody: String = "") async throws -> String {
+    func draftComposeBody(intent: String,
+                          subject: String,
+                          currentBody: String = "",
+                          onDelta: ((String) -> Void)? = nil) async throws -> String {
         guard let provider = ai.activeProvider else {
             throw ComposeAIError.noModel
         }
@@ -864,7 +869,12 @@ final class AppModel: ObservableObject {    // 数据
             provider: provider,
             model: model,
             system: outboundSystem,
-            user: user
+            user: user,
+            onDelta: onDelta.map { callback in
+                { partial in
+                    callback(mappings.isEmpty ? partial : Redactor.restore(partial, mappings))
+                }
+            }
         )
         return mappings.isEmpty ? text : Redactor.restore(text, mappings)
     }
@@ -1227,6 +1237,22 @@ final class AppModel: ObservableObject {    // 数据
         performAI(request)
     }
 
+    /// 阅读页 AI 输出的流式显示：节流到约 8 次/秒，
+    /// 失败时 `performAI` 的 catch 会用旧稿/本地结果覆盖，不会留下半截文本
+    private var aiLiveFlush = Date.distantPast
+
+    private func pushAILive(_ masked: String, mappings: [Redactor.Mapping]) {
+        if masked.isEmpty {
+            aiOutput = ""
+            aiLiveFlush = .distantPast
+            return
+        }
+        let now = Date()
+        guard now.timeIntervalSince(aiLiveFlush) >= 0.12 else { return }
+        aiLiveFlush = now
+        aiOutput = mappings.isEmpty ? masked : Redactor.restore(masked, mappings)
+    }
+
     private func performAI(_ request: PendingAIRequest) {
         // 演示模式：不真的发请求，直接给本地结果
         if request.simulated {
@@ -1249,7 +1275,12 @@ final class AppModel: ObservableObject {    // 数据
                     provider: provider,
                     model: request.model.isEmpty ? provider.selectedModel : request.model,
                     system: request.system,
-                    user: request.user
+                    user: request.user,
+                    onDelta: { partial in
+                        Task { @MainActor in
+                            self.pushAILive(partial, mappings: request.mappings)
+                        }
+                    }
                 )
                 aiOutput = request.mappings.isEmpty
                     ? text
@@ -1876,7 +1907,11 @@ final class AppModel: ObservableObject {    // 数据
         }
 
         askBusy = true
-        defer { askBusy = false }
+        askLiveText = ""
+        defer {
+            askBusy = false
+            askLiveText = ""
+        }
         // 每次提问重新计算删除配额：上限是防「一次对话里连删」的，不是防长期使用
         sessionTrashCount = 0
 
@@ -1896,6 +1931,22 @@ final class AppModel: ObservableObject {    // 数据
             finishAsk(turn.id, answer: message)
             errorMessage = message
         }
+    }
+
+    /// 流式回答的显示节流：每来一个 token 就重建一次 Markdown 太贵，
+    /// 合并到约 8 次/秒；最终文本由 `finishAsk` 兜底写入
+    private var askLiveFlush = Date.distantPast
+
+    private func pushAskLive(_ masked: String, redaction: RedactionContext) {
+        if masked.isEmpty {
+            askLiveText = ""
+            askLiveFlush = .distantPast
+            return
+        }
+        let now = Date()
+        guard now.timeIntervalSince(askLiveFlush) >= 0.12 else { return }
+        askLiveFlush = now
+        askLiveText = redaction.restore(masked)
     }
 
     /// 真正发请求的那一步。首次提问和「重跑」共用
@@ -2011,7 +2062,14 @@ final class AppModel: ObservableObject {    // 数据
             tools: Self.agentTools(trusted: trusted).map { $0.toolSchema },
             history: askHistoryForModel,
             usage: usage,
-            redaction: redaction
+            redaction: redaction,
+            onDelta: { [weak self] partial in
+                // 回调发生在流式连接上，界面更新必须回主线程；
+                // 映射表本身已经加锁，还原占位符放在主线程只是顺手
+                Task { @MainActor in
+                    self?.pushAskLive(partial, redaction: redaction)
+                }
+            }
         ) { call in
             await self.executeToolCall(call, store: scoped, scope: scope, window: window)
         }
@@ -2241,8 +2299,15 @@ final class AppModel: ObservableObject {    // 数据
         askHistory[index].range = rangeLabel
         askHistory[index].accounts = scopeNames
         askHistory[index].scanned = nil
+        // 旧的引用和用量属于上一次回答，重跑时必须一起清掉
+        askHistory[index].citations = []
+        askHistory[index].tokens = nil
         askBusy = true
-        defer { askBusy = false }
+        askLiveText = ""
+        defer {
+            askBusy = false
+            askLiveText = ""
+        }
 
         do {
             let result = try await runAsk(question)
@@ -2252,6 +2317,8 @@ final class AppModel: ObservableObject {    // 数据
                 askHistory[current].range = rangeLabel
                 askHistory[current].accounts = scopeNames
                 askHistory[current].scanned = result.scanned
+                askHistory[current].citations = result.citations
+                askHistory[current].tokens = result.tokens
             }
         } catch {
             if let current = askHistory.firstIndex(where: { $0.id == id }) {

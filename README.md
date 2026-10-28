@@ -34,7 +34,7 @@ open build/MailPilot.app
 | `make run` | 构建并启动 |
 | `make build` | 只构建打包 |
 | `make verify` | 只编译，快速检查编译错误 |
-| `make test` | 断言测试（合成邮件，不需要磁盘权限） |
+| `make test` | 断言测试（合成邮件 + 本地 mock 模型服务器，不需要磁盘权限） |
 | `make clean` | 删除 `.build/` 与 `build/` |
 
 ## 目录结构
@@ -63,7 +63,7 @@ MailPilotNative/
 │   ├── MailMutator.swift  # 通过「邮件」App 删除 / 标已读 / 旗标
 │   ├── MailSender.swift   # 通过「邮件」App 发信
 │   └── Views/             # SwiftUI 界面
-├── Tests/                 # 断言测试（合成 .emlx，不依赖 XCTest）
+├── Tests/                 # 断言测试（合成 .emlx / mock 模型服务器，不依赖 XCTest）
 ├── docs/
 │   └── SPEC.md            # 需求与实现现状
 ├── scripts/               # build / run / clean / test

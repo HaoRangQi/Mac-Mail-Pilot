@@ -2,6 +2,19 @@
 
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号暂用日期。
 
+## [0.2.61] - 2026-10-29
+
+### 新增 · 流式输出
+
+**边生成边看**：阅读页的 AI 草稿改写、写邮件页的 AI 起草 / 修稿、邮箱问答（含工具调用轮）都不再等整段生成完才显示。
+
+- **三种协议各自的流式解析**：OpenAI 兼容走 SSE `delta.content`；Ollama 走 NDJSON；Anthropic 走 SSE 内容块事件。工具调用同样支持流式——OpenAI 的 `arguments` 是**按 index 分片下发**的，必须逐片拼成合法 JSON 再解析；Anthropic 的 `tool_use.input` 走 `input_json_delta`，结束时还原成和非流式完全一样的 content 块数组
+- **自动回退**：网关不认 `stream` / `stream_options`（返回普通 JSON 或 4xx）时静默退回非流式请求，用户只会看到回答慢一点，不会多一条报错。密钥类错误（401/403/429）仍然照常换下一条密钥
+- **用量不丢**：OpenAI 请求带 `stream_options.include_usage`，Anthropic 从 `message_start` / `message_delta` 取，Ollama 取末尾计数——流式回答的 token 用量照常显示
+- **显示节流**：增量合并到约 8 次/秒再刷新界面，避免每个 token 都重排一次 Markdown
+- **脱敏映射表加锁**：流式还原发生在网络线程、下一轮脱敏发生在请求线程，会话级映射表现在读写都带锁；失败时用旧稿 / 原文覆盖半截文本，不会留下残缺内容
+- 顺带修正：问答「重跑」时清空上一轮的引用与 token 用量，不再沿用旧值
+
 ## [0.2.60] - 2026-10-29
 
 ### 新增 · 九件「日常用起来别扭」的事

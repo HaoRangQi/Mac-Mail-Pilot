@@ -206,6 +206,11 @@ struct AskBar: View {
                     proxy.scrollTo("bottom", anchor: .bottom)
                 }
             }
+            // 流式回答在长高，跟着滚；不加动画——每 0.12 秒一次动画反而会抖
+            .onChange(of: model.askLiveText) { _, _ in
+                guard model.askBusy else { return }
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
         }
     }
 
@@ -283,11 +288,21 @@ struct AskBar: View {
             })
 
             if turn.answer.isEmpty {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
-                    Text("正在读你的邮箱…")
-                        .font(.app(12))
-                        .foregroundStyle(.secondary)
+                if isLatest, model.askBusy, !model.askLiveText.isEmpty {
+                    // 已经有 token 回来了：先按 Markdown 显示半成品，
+                    // 和最终回答用同一套渲染，避免收尾时版面跳一下
+                    HStack(alignment: .top, spacing: 7) {
+                        ProgressView().controlSize(.mini).padding(.top, 3)
+                        MarkdownText(text: model.askLiveText, baseSize: 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("正在读你的邮箱…")
+                            .font(.app(12))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } else {
                 HStack(alignment: .top, spacing: 7) {

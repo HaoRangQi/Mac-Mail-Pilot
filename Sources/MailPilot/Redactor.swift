@@ -88,8 +88,17 @@ struct Redactor {
         private let customRules: [CustomRedactionRule]
         private let keywords: [String]
 
-        private(set) var mappings: [Mapping] = []
+        /// 会话级上下文现在会同时被「流式回调里的还原」和「下一轮的脱敏」访问
+        /// （不在同一个线程），映射表必须加锁，否则会边写边读
+        private let lock = NSLock()
+        private var mappingStorage: [Mapping] = []
         private var counters: [String: Int] = [:]
+
+        var mappings: [Mapping] {
+            lock.lock()
+            defer { lock.unlock() }
+            return mappingStorage
+        }
 
         init(disabledRules: Set<String> = [],
              customRules: [CustomRedactionRule] = [],
@@ -104,6 +113,8 @@ struct Redactor {
         }
 
         func redact(_ text: String) -> String {
+            lock.lock()
+            defer { lock.unlock() }
             var output = text
 
             // 1. 关键字：纯文本匹配，不依赖正则，最可靠
@@ -112,13 +123,13 @@ struct Redactor {
                 while let found = output.range(of: keyword, range: cursor..<output.endIndex) {
                     let original = String(output[found])
                     let placeholder: String
-                    if let existing = mappings.first(where: { $0.original == original }) {
+                    if let existing = mappingStorage.first(where: { $0.original == original }) {
                         placeholder = existing.placeholder
                     } else {
                         let index = (counters["关键字"] ?? 0) + 1
                         counters["关键字"] = index
                         placeholder = "⟨关键字\(index)⟩"
-                        mappings.append(Mapping(placeholder: placeholder, original: original))
+                        mappingStorage.append(Mapping(placeholder: placeholder, original: original))
                     }
                     output.replaceSubrange(found, with: placeholder)
                     // 从占位符之后继续，避免占位符自身被再次命中导致死循环
@@ -150,7 +161,7 @@ struct Redactor {
                 let original = String(output[range])
 
                 // 同一实体多次出现复用同一个占位符
-                if let existing = mappings.first(where: { $0.original == original }) {
+                if let existing = mappingStorage.first(where: { $0.original == original }) {
                     assigned.append((range, existing.placeholder))
                     continue
                 }
@@ -158,7 +169,7 @@ struct Redactor {
                 let index = (counters[type] ?? 0) + 1
                 counters[type] = index
                 let placeholder = "⟨\(type)\(index)⟩"
-                mappings.append(Mapping(placeholder: placeholder, original: original))
+                mappingStorage.append(Mapping(placeholder: placeholder, original: original))
                 assigned.append((range, placeholder))
             }
 
@@ -228,7 +239,10 @@ final class RedactionContext {
     /// 只还原**给用户看**的最终回答。
     /// 工具参数（真正要发出去的内容）绝不能走这里——还原等于把真实值写成外发邮件。
     func restore(_ text: String) -> String {
-        guard enabled, !session.mappings.isEmpty else { return text }
-        return Redactor.restore(text, session.mappings)
+        guard enabled else { return text }
+        // 取一次快照：流式还原和下一轮脱敏可能交错，别让两次读取看到不同的表
+        let mappings = session.mappings
+        guard !mappings.isEmpty else { return text }
+        return Redactor.restore(text, mappings)
     }
 }

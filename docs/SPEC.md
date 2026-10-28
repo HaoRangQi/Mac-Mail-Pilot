@@ -107,6 +107,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **AI 工具调用（tool calling）**：`MailTool` 9 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 支持 OpenAI / Anthropic / Ollama 三种协议（上限 4 轮）。**Ollama 有三处形状不同**（0.2.52 实测修正）：消息在顶层 `message` 而不是 `choices[0].message`；`function.arguments` 是对象不是 JSON 字符串；工具结果必须用 `tool_name` 回传，只给 `tool_call_id` 会让模型重复调同一个工具直到轮数耗尽。**工具集按模型信任级别下发**（`agentTools(trusted:)`）：可信/本地模型拿到全部 9 个；不可信模型只有 `searchMessages` / `getMessage` / `listMailboxes` / `moveToTrash`（挂起等确认）/ `sendMessage`（永远确认 + 收件人受限 + 正文不回补）/ `proposeBatch`。`markRead` / `setFlag` / `saveDraft` 这三个写入类**根本没下发给不可信模型**，模型凭记忆发出来也会被拒
   - **轮数用尽要软着陆**（0.2.55）：小模型会一路调工具把 4 轮耗光，原来直接报错等于把前几轮的成果全扔了。最后一轮**不下发 `tools`** 并明说「别调了，直接根据已查到的信息回答」，同时把沿途每轮的正文留着兜底；最后一轮若模型仍凭记忆发出工具调用，**不执行**（没有下一轮，执行只会白改数据）。报错信息带上每轮调了哪些工具。Ollama 请求体带 `keep_alive: "30m"`（闲置 5 分钟就卸载权重，一次提问只该付一次加载代价），本地超时单独放宽到 180s
   - 「4 轮都在调工具」**不是**模型没加载导致的：实测冷启动 `load_duration` 3ms、单轮往返 1–2 秒。模型没加载只会变慢，不会凭空返回 `tool_calls`
+- **流式输出**（0.2.61）：`AIService.chat(... onDelta:)` 与 `chatWithTools(... onDelta:)` 边生成边回调，回调给的是**本轮到目前为止的完整文本**（不是增量），调用方直接覆盖显示。OpenAI 兼容走 SSE，Ollama 走 NDJSON，Anthropic 走内容块事件；工具调用的 `arguments` / `input_json` 是分片下发的，按 index 拼装后再解析，回传给下一轮的 assistant 消息与非流式路径同构。**流式只是传输层加速，不改决策链**：拿不到任何内容（网关不认 `stream`）就静默退回非流式；401/403/429 仍按密钥轮换处理。会话级脱敏映射表（`Redactor.Session`）加了锁——流式还原和下一轮 mask 可能不在同一线程
 - **「外观」设置页**（0.2.35）：主题、强调色（内置四色 + 系统调色盘，自选色深色模式自动提亮）、字体族（系统 / 圆体 / 衬线 / 等宽）、整体字号四档、列表密度、面板宽度、背景色斑强度、正文字号与行距；带实时预览与一键恢复默认
   - 342 处硬编码字号全部收口到 `Font.app()`，由 `UIState` 快照统一缩放；主题/布局只读快照，改设置经 store → `UIState` → `AppModel` 转发触发重绘
   - 设置面板改左侧竖排导航（6 个中文 Tab 用 segmented 会被系统撑到 900pt 顶出窗口）
@@ -124,7 +125,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **会话视图**（0.2.43）：列表按线程聚合（最新一封 + 「N 封」角标），阅读页顶部有会话栏可切换；搜索时不聚合
 - **Anthropic 工具调用**（0.2.43）：`chatWithTools` 分出 Anthropic 分支（顶层 `system` + `tool_use` / `tool_result` 内容块），工具定义自动转换，脱敏钩子两条路径一致
 - **AI 批量处理**（0.2.43）：`proposeBatch` 工具 + 勾选清单 sheet。锁定邮件在解析阶段被丢弃、不会进清单；不可信模型只能批量删除；单次上限 50 封
-- **仓库内断言测试**（0.2.43）：`make test` 跑 63 条断言，全部用合成 `.emlx`，不依赖 XCTest 与磁盘权限
+- **仓库内断言测试**（0.2.43）：`make test` 跑 90 条断言，全部用合成 `.emlx` 或本地 mock 服务器，不依赖 XCTest、磁盘权限与外网
 - **侧边栏按服务商归类**（0.2.37）：三层结构「服务商 → 账号 → 邮箱」，`MailService.detect(email:)` 按邮箱域名识别 Gmail / Outlook / iCloud / Yahoo / QQ / 网易 / 其他；服务商与账号都可折叠，折叠键分别为 `svc:<名>` 与账号 id
 - **写邮件页 AI**（0.2.37）：主题行下方 AI 条，按意图起草正文；正文非空时切换为「AI 修稿」按意图改写全文。主题作为显式约束写进提示词防跑偏，不填主题则约束不出现。外发内容只有用户意图 + 主题（修稿时含当前正文），不可信模型仍脱敏但**不弹确认**——用户点「AI 起草」本身即明确外发意图，且邮件正文不在外发内容里。**正文非空时留空也能点**（0.2.56）：那就是一键润色，提示词写死「不改原意与信息量，保留称呼、数字、日期和承诺，不新增不省略」——「改写」类指令最容易顺手加戏或删承诺，边界必须写进提示词
 - **AI 问答浮层 AskBar**（0.2.37 / 0.2.54）：Markdown 渲染（`MarkdownText.parse` 按行切块 → `MarkdownRenderer` 拼成一份 `NSAttributedString`）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。**整段回答由一个 `NSTextView`（`SelectableTextView`）承载**——SwiftUI 的 `Text` 一段一个可选区，列表里每条都是独立 `Text`，跨行选中做不到。版式（列表悬挂缩进、代码块底色、引用竖线）由 `NSParagraphStyle` 还原，字号仍读 `UIState`。提问气泡同样 `textSelection(.enabled)`，外层手势用 `simultaneousGesture` 以免吃掉拖选
@@ -196,7 +197,7 @@ make clean    # 删除构建产物
 
 依赖：macOS 26+（Liquid Glass），Command Line Tools。
 
-`make test` 跑 `scripts/test.sh`，三套共 74 条断言：上锁与访问控制（39）、索引与 FTS（18）、附件与线程（17）。全部用合成 `.emlx`，不依赖 XCTest 也不依赖完全磁盘访问权限，任何机器上都能跑。
+`make test` 跑 `scripts/test.sh`，四套共 90 条断言：上锁与访问控制（39）、索引与 FTS（18）、附件与线程（17）、流式协议（16）。前三套用合成 `.emlx`；流式套件起一个本地 Python mock 服务器，编译真实的 `AIService` 源码打过去，验证 SSE / NDJSON 解析、工具参数分片拼装、三家协议回传上下文与回退。不依赖 XCTest、完全磁盘访问权限和外网，任何机器上都能跑。
 
 没用 SwiftPM testTarget 的原因：可执行 target 不能被测试 target import，要先拆成 library。拆包会波及所有类型可见性，收益不抵风险，所以先用 `swiftc` 直接编译被测文件。
 

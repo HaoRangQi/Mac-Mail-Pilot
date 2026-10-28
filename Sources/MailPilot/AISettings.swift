@@ -411,7 +411,14 @@ enum AIService {
         try await chat(provider: provider, model: provider.selectedModel, system: system, user: user)
     }
 
-    static func chat(provider: AIProvider, model: String, system: String, user: String) async throws -> String {
+    /// `onDelta` 非空时走流式：每收到一段就回调**到目前为止的完整文本**（不是增量），
+    /// 调用方可以直接覆盖显示。流式拿不到东西（网关不认 stream 等）时自动退回非流式，
+    /// 不会让用户多看到一次报错。
+    static func chat(provider: AIProvider,
+                     model: String,
+                     system: String,
+                     user: String,
+                     onDelta: ((String) -> Void)? = nil) async throws -> String {
         guard provider.enabled, !model.isEmpty else { throw AIError.notConfigured }
 
         let keys = keyCandidates(provider)
@@ -426,6 +433,30 @@ enum AIService {
         var lastError: Error = AIError.notConfigured
         for key in keys {
             do {
+                if let onDelta {
+                    var streamBody = body
+                    streamBody["stream"] = true
+                    if provider.kind == .openai {
+                        // 让最后一块带上 usage，否则流式回答的 token 用量永远是 0
+                        streamBody["stream_options"] = ["include_usage": true]
+                    }
+                    do {
+                        if let text = try await streamPlainChat(provider: provider, url: url,
+                                                                key: key, body: streamBody,
+                                                                onDelta: onDelta) {
+                            return text
+                        }
+                    } catch let error as AIError {
+                        // 密钥问题必须往上走，换下一条；其余（网关不认 stream / 解析不了）退非流式
+                        if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
+                            throw error
+                        }
+                    } catch {
+                        // 传输层异常：同样退非流式
+                    }
+                    // 清掉已经显示出来的半截流式文本，避免和非流式结果拼在一起
+                    onDelta("")
+                }
                 let data = try await send(url: url, method: "POST",
                                           headers: authHeaders(provider.kind, key), body: body,
                                           timeout: localTimeout(provider.kind))
@@ -439,6 +470,408 @@ enum AIService {
             }
         }
         throw lastError
+    }
+
+    // MARK: - 流式底层
+
+    /// 流式请求的公共通道：逐行读 SSE / NDJSON，读到的每一行交给 `onLine`。
+    /// 非 200 在这里就变成 AIError.http，和 `send` 保持同一套错误口径。
+    private static func openStream(url: URL,
+                                   headers: [String: String],
+                                   body: [String: Any],
+                                   timeout: TimeInterval,
+                                   onLine: (String) throws -> Void) async throws {
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = timeout
+        headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            // 错误体通常很小，读到这里就够拼出可读的报错了
+            var data = Data()
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count >= 8192 { break }
+            }
+            throw AIError.http(code, String(data: data, encoding: .utf8) ?? "")
+        }
+        for try await line in bytes.lines {
+            try onLine(line)
+        }
+    }
+
+    /// SSE 的 `data: {...}` 行；注释行和其他字段直接忽略
+    private static func sseJSON(_ line: String) -> [String: Any]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("data:") else { return nil }
+        let payload = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+        guard payload != "[DONE]", !payload.isEmpty,
+              let data = payload.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// 流里出现的服务端错误要当场抛出去，不能当成「没有内容」静默跳过
+    private static func streamError(_ json: [String: Any]) -> AIError? {
+        if let error = json["error"] as? [String: Any] {
+            let message = error["message"] as? String ?? "\(error)"
+            return .emptyResponse("服务端报错：\(message.prefix(160))")
+        }
+        if let error = json["error"] as? String {
+            return .emptyResponse("服务端报错：\(error.prefix(160))")
+        }
+        if (json["type"] as? String) == "error" {
+            let message = (json["error"] as? [String: Any])?["message"] as? String ?? "未知错误"
+            return .emptyResponse("服务端报错：\(message.prefix(160))")
+        }
+        return nil
+    }
+
+    /// 一轮流式响应的归一化结果：两家协议拼出来的东西不一样，
+    /// 上层循环只关心「文本」和「要调哪些工具」
+    private struct StreamedRound {
+        var received = false
+        var text = ""
+        /// OpenAI / Ollama：可直接回传的 assistant 消息
+        var message: [String: Any] = [:]
+        /// Anthropic：可直接回传的 content 块
+        var content: [[String: Any]] = []
+        var toolCalls: [[String: Any]] = []
+        /// Anthropic 的结束原因，只用于空回答时的诊断
+        var stopReason: String?
+    }
+
+    /// 不带工具的流式对话。拿不到任何文本时返回 nil，让调用方退回非流式。
+    private static func streamPlainChat(provider: AIProvider,
+                                        url: URL,
+                                        key: String,
+                                        body: [String: Any],
+                                        onDelta: (String) -> Void) async throws -> String? {
+        let round: StreamedRound
+        switch provider.kind {
+        case .openai:
+            round = try await streamOpenAI(url: url, key: key, body: body, usage: nil, onDelta: onDelta)
+        case .ollama:
+            round = try await streamOllama(url: url, key: key, body: body, usage: nil, onDelta: onDelta)
+        case .anthropic:
+            round = try await streamAnthropic(url: url, key: key, body: body, usage: nil, onDelta: onDelta)
+        }
+        let text = round.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    /// OpenAI 兼容协议的流式解析。
+    /// 工具调用是**分片**下发的：同一个 index 的 `arguments` 要一段段拼起来，
+    /// 拼完才是合法 JSON——直接解析第一片必然失败。
+    private static func streamOpenAI(url: URL,
+                                     key: String,
+                                     body: [String: Any],
+                                     usage: UsageBox?,
+                                     onDelta: (String) -> Void) async throws -> StreamedRound {
+        var round = StreamedRound()
+        var slots: [Int: [String: Any]] = [:]
+        var order: [Int] = []
+        onDelta("")
+
+        try await openStream(url: url, headers: authHeaders(.openai, key),
+                             body: body, timeout: localTimeout(.openai)) { line in
+            guard let json = sseJSON(line) else { return }
+            if let error = streamError(json) { throw error }
+
+            if let u = json["usage"] as? [String: Any] {
+                usage?.add(input: u["prompt_tokens"] as? Int ?? 0,
+                           output: u["completion_tokens"] as? Int ?? 0)
+            }
+            guard let choices = json["choices"] as? [[String: Any]] else { return }
+            round.received = true
+            guard let delta = choices.first?["delta"] as? [String: Any] else { return }
+
+            if let piece = delta["content"] as? String, !piece.isEmpty {
+                round.text += piece
+                onDelta(round.text)
+            }
+            guard let rawCalls = delta["tool_calls"] as? [[String: Any]] else { return }
+            for item in rawCalls {
+                let index = item["index"] as? Int ?? (order.last ?? 0)
+                if slots[index] == nil {
+                    order.append(index)
+                    slots[index] = ["id": "", "name": "", "arguments": ""]
+                }
+                var slot = slots[index] ?? [:]
+                if let id = item["id"] as? String, !id.isEmpty { slot["id"] = id }
+                if let function = item["function"] as? [String: Any] {
+                    if let name = function["name"] as? String, !name.isEmpty { slot["name"] = name }
+                    if let args = function["arguments"] as? String {
+                        slot["arguments"] = (slot["arguments"] as? String ?? "") + args
+                    }
+                }
+                slots[index] = slot
+            }
+        }
+
+        round.toolCalls = order.sorted().compactMap { index in
+            guard let slot = slots[index],
+                  let name = slot["name"] as? String, !name.isEmpty else { return nil }
+            let id = (slot["id"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? UUID().uuidString
+            return [
+                "id": id,
+                "type": "function",
+                "function": ["name": name, "arguments": slot["arguments"] as? String ?? "{}"],
+            ]
+        }
+        var message: [String: Any] = [
+            "role": "assistant",
+            "content": round.text.isEmpty ? NSNull() : round.text,
+        ]
+        if !round.toolCalls.isEmpty { message["tool_calls"] = round.toolCalls }
+        round.message = message
+        return round
+    }
+
+    /// Ollama 的流是 NDJSON：一行一个完整 JSON，工具调用一次给全，不需要拼装
+    private static func streamOllama(url: URL,
+                                     key: String,
+                                     body: [String: Any],
+                                     usage: UsageBox?,
+                                     onDelta: (String) -> Void) async throws -> StreamedRound {
+        var round = StreamedRound()
+        var calls: [[String: Any]] = []
+        onDelta("")
+
+        try await openStream(url: url, headers: authHeaders(.ollama, key),
+                             body: body, timeout: localTimeout(.ollama)) { line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty,
+                  let data = trimmed.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+            if let error = streamError(json) { throw error }
+            round.received = true
+
+            if let message = json["message"] as? [String: Any] {
+                if let piece = message["content"] as? String, !piece.isEmpty {
+                    round.text += piece
+                    onDelta(round.text)
+                }
+                if let raw = message["tool_calls"] as? [[String: Any]] {
+                    calls.append(contentsOf: raw)
+                }
+            }
+            if let input = json["prompt_eval_count"] as? Int {
+                usage?.add(input: input, output: json["eval_count"] as? Int ?? 0)
+            }
+        }
+
+        round.toolCalls = calls
+        var message: [String: Any] = ["role": "assistant", "content": round.text]
+        if !calls.isEmpty { message["tool_calls"] = calls }
+        round.message = message
+        return round
+    }
+
+    /// Anthropic 的流式：文本按 `text_delta` 追加，工具参数按 `input_json_delta` 拼接，
+    /// 结束时要还原成和**非流式完全一样**的 content 块数组——下一轮要原样回传
+    private static func streamAnthropic(url: URL,
+                                        key: String,
+                                        body: [String: Any],
+                                        usage: UsageBox?,
+                                        onDelta: (String) -> Void) async throws -> StreamedRound {
+        var round = StreamedRound()
+        var blocks: [Int: [String: Any]] = [:]
+        var order: [Int] = []
+        onDelta("")
+
+        try await openStream(url: url, headers: authHeaders(.anthropic, key),
+                             body: body, timeout: localTimeout(.anthropic)) { line in
+            guard let json = sseJSON(line) else { return }
+            if let error = streamError(json) { throw error }
+
+            switch json["type"] as? String ?? "" {
+            case "message_start":
+                round.received = true
+                // 这里只取 input；output 的最终值在 message_delta 里，两处都加会重复
+                if let message = json["message"] as? [String: Any],
+                   let u = message["usage"] as? [String: Any] {
+                    usage?.add(input: u["input_tokens"] as? Int ?? 0, output: 0)
+                }
+
+            case "content_block_start":
+                round.received = true
+                guard let index = json["index"] as? Int,
+                      let block = json["content_block"] as? [String: Any] else { return }
+                if blocks[index] == nil { order.append(index) }
+                var slot = block
+                if slot["type"] as? String == "tool_use" { slot["_partial"] = "" }
+                blocks[index] = slot
+
+            case "content_block_delta":
+                guard let index = json["index"] as? Int,
+                      var slot = blocks[index],
+                      let delta = json["delta"] as? [String: Any] else { return }
+                switch delta["type"] as? String ?? "" {
+                case "text_delta":
+                    slot["text"] = (slot["text"] as? String ?? "") + (delta["text"] as? String ?? "")
+                    blocks[index] = slot
+                    round.text = order.sorted()
+                        .compactMap { blocks[$0]?["text"] as? String }
+                        .joined(separator: "\n")
+                    onDelta(round.text)
+                case "input_json_delta":
+                    slot["_partial"] = (slot["_partial"] as? String ?? "") + (delta["partial_json"] as? String ?? "")
+                    blocks[index] = slot
+                default:
+                    break
+                }
+
+            case "content_block_stop":
+                guard let index = json["index"] as? Int, var slot = blocks[index] else { return }
+                if slot["type"] as? String == "tool_use" {
+                    if let partial = slot["_partial"] as? String,
+                       let data = partial.data(using: .utf8),
+                       let input = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        slot["input"] = input
+                    } else {
+                        slot["input"] = [:]
+                    }
+                }
+                slot.removeValue(forKey: "_partial")
+                blocks[index] = slot
+
+            case "message_delta":
+                // stop_reason 在这里，但 content 只用于回传给下一轮，不能混进去
+                if let delta = json["delta"] as? [String: Any] {
+                    round.stopReason = delta["stop_reason"] as? String
+                }
+                if let u = json["usage"] as? [String: Any] {
+                    usage?.add(input: 0, output: u["output_tokens"] as? Int ?? 0)
+                }
+
+            default:
+                break
+            }
+        }
+
+        var content: [[String: Any]] = []
+        for index in order.sorted() {
+            guard let slot = blocks[index] else { continue }
+            switch slot["type"] as? String ?? "" {
+            case "text":
+                let text = slot["text"] as? String ?? ""
+                if !text.isEmpty { content.append(["type": "text", "text": text]) }
+            case "tool_use":
+                content.append([
+                    "type": "tool_use",
+                    "id": slot["id"] as? String ?? UUID().uuidString,
+                    "name": slot["name"] as? String ?? "",
+                    "input": slot["input"] as? [String: Any] ?? [:],
+                ])
+            default:
+                break
+            }
+        }
+        // stop_reason 只是诊断信息，不能留在 content 里回传给下一轮
+        round.content = content
+        round.text = content.filter { ($0["type"] as? String) == "text" }
+            .compactMap { $0["text"] as? String }
+            .joined(separator: "\n")
+        return round
+    }
+
+    /// 一轮 OpenAI / Ollama 请求：有 onDelta 就先试流式，拿不到任何东西再退回非流式。
+    /// 密钥错误必须往上抛（外层要换 key）；其余 HTTP 错误多半是网关不认 stream，静默回退。
+    private static func openAIRound(kind: ProviderKind,
+                                    url: URL,
+                                    key: String,
+                                    body: [String: Any],
+                                    usage: UsageBox?,
+                                    onDelta: ((String) -> Void)?) async throws
+        -> (message: [String: Any], json: [String: Any]) {
+        if let onDelta {
+            var streamBody = body
+            streamBody["stream"] = true
+            if kind == .openai {
+                streamBody["stream_options"] = ["include_usage": true]
+            }
+            do {
+                let round: StreamedRound
+                if kind == .ollama {
+                    round = try await streamOllama(url: url, key: key, body: streamBody,
+                                                   usage: usage, onDelta: onDelta)
+                } else {
+                    round = try await streamOpenAI(url: url, key: key, body: streamBody,
+                                                   usage: usage, onDelta: onDelta)
+                }
+                if round.received {
+                    return (round.message, ["stream": true])
+                }
+            } catch let error as AIError {
+                if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
+                    throw error
+                }
+            } catch {
+                // 传输层异常：退非流式
+            }
+            onDelta("")
+        }
+
+        let data = try await send(url: url, method: "POST",
+                                  headers: authHeaders(kind, key), body: body,
+                                  timeout: localTimeout(kind))
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIError.emptyResponse("响应不是 JSON（\(data.count) 字节）")
+        }
+        recordUsage(from: json, into: usage)
+        guard let message = assistantMessage(from: json) else {
+            throw AIError.emptyResponse(describeResponse(json, data))
+        }
+        return (message, json)
+    }
+
+    /// 一轮 Anthropic 请求，回退规则同 `openAIRound`
+    private static func anthropicRound(url: URL,
+                                       key: String,
+                                       body: [String: Any],
+                                       usage: UsageBox?,
+                                       onDelta: ((String) -> Void)?) async throws
+        -> (content: [[String: Any]], text: String, json: [String: Any]) {
+        if let onDelta {
+            var streamBody = body
+            streamBody["stream"] = true
+            do {
+                let round = try await streamAnthropic(url: url, key: key, body: streamBody,
+                                                      usage: usage, onDelta: onDelta)
+                if round.received {
+                    let text = round.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let json: [String: Any] = ["stream": true,
+                                               "stop_reason": round.stopReason ?? "未知"]
+                    return (round.content, text, json)
+                }
+            } catch let error as AIError {
+                if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
+                    throw error
+                }
+            } catch {
+                // 传输层异常：退非流式
+            }
+            onDelta("")
+        }
+
+        let data = try await send(url: url, method: "POST",
+                                  headers: authHeaders(.anthropic, key), body: body,
+                                  timeout: localTimeout(.anthropic))
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let content = json["content"] as? [[String: Any]] else {
+            throw AIError.empty
+        }
+        recordUsage(from: json, into: usage)
+        let text = content
+            .filter { ($0["type"] as? String) == "text" }
+            .compactMap { $0["text"] as? String }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (content, text, json)
     }
 
     // MARK: - 带工具调用的对话
@@ -459,6 +892,7 @@ enum AIService {
                               maxRounds: Int = 4,
                               usage: UsageBox? = nil,
                               redaction: RedactionContext? = nil,
+                              onDelta: ((String) -> Void)? = nil,
                               execute: @escaping (ToolCall) async throws -> String) async throws -> String {
         guard provider.enabled, !model.isEmpty else { throw AIError.notConfigured }
 
@@ -472,6 +906,7 @@ enum AIService {
                                                     maxRounds: maxRounds,
                                                     usage: usage,
                                                     redaction: redaction,
+                                                    onDelta: onDelta,
                                                     execute: execute)
         }
 
@@ -531,16 +966,10 @@ enum AIService {
                     if forceNoTools { body["tool_choice"] = "none" }
                     applyKeepAlive(&body, kind: provider.kind)
 
-                    let data = try await send(url: url, method: "POST",
-                                              headers: authHeaders(provider.kind, key), body: body,
-                                              timeout: localTimeout(provider.kind))
-                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                        throw AIError.emptyResponse("响应不是 JSON（\(data.count) 字节）")
-                    }
-                    recordUsage(from: json, into: usage)
-                    guard let message = assistantMessage(from: json) else {
-                        throw AIError.emptyResponse(describeResponse(json, data))
-                    }
+                    let step = try await openAIRound(kind: provider.kind, url: url, key: key,
+                                                     body: body, usage: usage, onDelta: onDelta)
+                    let message = step.message
+                    let json = step.json
 
                     // 有些模型会「一边调工具一边写结论」，这段正文同样有用，先留着
                     if let content = messageText(message) { lastContent = content }
@@ -643,6 +1072,7 @@ enum AIService {
                                                maxRounds: Int,
                                                usage: UsageBox?,
                                                redaction: RedactionContext?,
+                                               onDelta: ((String) -> Void)?,
                                                execute: @escaping (ToolCall) async throws -> String) async throws -> String {
         let keys = keyCandidates(provider)
         guard !keys.isEmpty else { throw AIError.noKey }
@@ -695,20 +1125,11 @@ enum AIService {
                     ]
                     if !anthropicTools.isEmpty, !isLastRound { body["tools"] = anthropicTools }
 
-                    let data = try await send(url: url, method: "POST",
-                                              headers: authHeaders(provider.kind, key), body: body,
-                                              timeout: localTimeout(provider.kind))
-                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let content = json["content"] as? [[String: Any]] else {
-                        throw AIError.empty
-                    }
-
-                    recordUsage(from: json, into: usage)
-                    let text = content
-                        .filter { ($0["type"] as? String) == "text" }
-                        .compactMap { $0["text"] as? String }
-                        .joined(separator: "\n")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let step = try await anthropicRound(url: url, key: key, body: body,
+                                                        usage: usage, onDelta: onDelta)
+                    let content = step.content
+                    let text = step.text
+                    let json = step.json
                     let toolUses = content.filter { ($0["type"] as? String) == "tool_use" }
 
                     if !text.isEmpty { lastText = text }
