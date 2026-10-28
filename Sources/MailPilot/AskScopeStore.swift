@@ -49,6 +49,9 @@ final class AskScopeStore: MailStore {
     /// 范围限制看不见摸不着，用户只能靠这个数字确认它确实生效了
     private let lock = NSLock()
     private var seen: Set<String> = []
+    /// 按首次读到的顺序留一份，回答下方要列「这次读了哪几封」并支持点回去
+    private var order: [String] = []
+    private var byID: [String: Message] = [:]
 
     init(inner: MailStore, scope: AskScope) {
         self.inner = inner
@@ -63,11 +66,22 @@ final class AskScopeStore: MailStore {
         return seen.count
     }
 
+    /// 本轮真正读过的邮件（去重、按首次读到排序）。
+    /// 这是「回答可溯源」的数据来源——不依赖模型自己在正文里写对 ID
+    var citations: [Message] {
+        lock.lock()
+        defer { lock.unlock() }
+        return order.compactMap { byID[$0] }
+    }
+
     private func note(_ rows: [Message]) {
         guard !rows.isEmpty else { return }
         lock.lock()
         defer { lock.unlock() }
-        seen.formUnion(rows.map(\.id))
+        for row in rows where seen.insert(row.id).inserted {
+            order.append(row.id)
+            byID[row.id] = row
+        }
     }
 
     func accounts() async throws -> [Account] {

@@ -126,6 +126,24 @@ enum AskDateRange: String, CaseIterable, Identifiable {
     }
 }
 
+/// 一次问答的结果。用结构体而不是四元组：字段只会越加越多
+struct AskOutcome {
+    var answer: String
+    var redactions: [Redactor.Mapping] = []
+    var scanned: Int = 0
+    var citations: [AskCitation] = []
+    /// 本轮累计 token（输入 + 输出）。拿不到就是 0，界面不显示
+    var tokens: Int = 0
+}
+
+/// 回答引用到的一封邮件。只存展示需要的字段，历史记录才不至于臃肿
+struct AskCitation: Codable, Hashable, Identifiable {
+    var id: String
+    var subject: String
+    var sender: String
+    var date: Date
+}
+
 struct AskTurn: Identifiable, Codable, Hashable {
     var id: String = UUID().uuidString
     var question: String
@@ -138,6 +156,10 @@ struct AskTurn: Identifiable, Codable, Hashable {
     var range: String? = nil
     /// 本轮真正读到的不同邮件数。范围限制生效没生效，用户只能靠这个数看出来
     var scanned: Int? = nil
+    /// 回答引用了哪些邮件。模型说的每句话都能点回原文，才谈得上可信
+    var citations: [AskCitation] = []
+    /// 本轮消耗的 token。成本看不见就会失控，哪怕只是个量级也得露出来
+    var tokens: Int? = nil
 
     init(id: String = UUID().uuidString,
          question: String,
@@ -146,7 +168,9 @@ struct AskTurn: Identifiable, Codable, Hashable {
          accounts: [String] = [],
          redactions: [Redactor.Mapping] = [],
          range: String? = nil,
-         scanned: Int? = nil) {
+         scanned: Int? = nil,
+         citations: [AskCitation] = [],
+         tokens: Int? = nil) {
         self.id = id
         self.question = question
         self.answer = answer
@@ -155,6 +179,8 @@ struct AskTurn: Identifiable, Codable, Hashable {
         self.redactions = redactions
         self.range = range
         self.scanned = scanned
+        self.citations = citations
+        self.tokens = tokens
     }
 
     /// 旧版本存的历史里没有 `redactions`，缺字段按空处理——
@@ -169,7 +195,17 @@ struct AskTurn: Identifiable, Codable, Hashable {
         redactions = try container.decodeIfPresent([Redactor.Mapping].self, forKey: .redactions) ?? []
         range = try container.decodeIfPresent(String.self, forKey: .range)
         scanned = try container.decodeIfPresent(Int.self, forKey: .scanned)
+        citations = try container.decodeIfPresent([AskCitation].self, forKey: .citations) ?? []
+        tokens = try container.decodeIfPresent(Int.self, forKey: .tokens)
     }
+}
+
+/// 打开写邮件窗口时带进去的初始内容。转发用；普通新建时为 nil
+struct ComposePrefill {
+    var to = ""
+    var cc = ""
+    var subject = ""
+    var body = ""
 }
 
 @MainActor
@@ -202,6 +238,8 @@ final class AppModel: ObservableObject {    // 数据
     /// 回复草稿的编辑态
     @Published var aiEditing = false
     @Published var aiDraftText = ""
+    /// 改写前的那一版草稿。只有一档，够用——再往回退就重新生成
+    @Published var aiUndoDraft: String?
     @Published var composing = false
     @Published var showSettings = false
     /// 阅读区独占窗口：把侧边栏和列表挤掉，方便看长正文
@@ -210,8 +248,19 @@ final class AppModel: ObservableObject {    // 数据
     @Published var showDeleteConfirm = false
     /// 删除执行中（全库扫描兜底可能耗时，界面需要给出反馈）
     @Published var deleting = false
+    /// 列表一次加载多少封。翻到底可以翻倍，「加载更多」是唯一的入口
+    @Published var messageLimit = 200
+    /// 多选态：开启后点行是勾选而不是打开
+    @Published var selectMode = false
+    @Published var multiSelected: Set<String> = []
+    @Published var pendingBatchDelete: [Message] = []
+    @Published var showBatchDeleteConfirm = false
     /// 待确认发送的 AI 正文（非 nil 时弹确认框）
     @Published var pendingAISend: String?
+    /// 回复时是否带上原邮件的其他收件人（回复全部）
+    @Published var replyAll = false
+    /// 打开写邮件窗口时预填的内容（转发用）
+    @Published var composePrefill: ComposePrefill?
     /// 待确认的 AI 请求（不可信模型 + 会生成对外内容时弹框）
     @Published var pendingAI: PendingAIRequest?
     @Published var showOnboarding = false
@@ -295,6 +344,51 @@ final class AppModel: ObservableObject {    // 数据
             }
         }
         writeLaunchStatus()
+        startAutoRefresh()
+    }
+
+    // MARK: - 自动刷新
+
+    private var refreshTimer: Timer?
+    private var activationObserver: AnyCancellable?
+
+    /// 每分钟一次 + 切回前台立刻刷一次。
+    ///
+    /// 不做文件监听：`~/Library/Mail` 底下几十万个文件，FSEvents 的噪音比收益大，
+    /// 而读盘走的是索引缓存（path + mtime + size 没变就不重解析），一分钟一次很便宜。
+    func startAutoRefresh() {
+        guard refreshTimer == nil else { return }
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                // 在后台挂着时不必刷：用户看不见，还白白读盘
+                guard let self, NSApp.isActive else { return }
+                await self.refreshQuietly()
+            }
+        }
+        activationObserver = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in await self?.refreshQuietly() }
+            }
+    }
+
+    /// 静默刷新：不闪加载态、不动当前选中、不改动搜索中的列表
+    func refreshQuietly() async {
+        guard !isDemo, !syncing, !loading else { return }
+        syncing = true
+        defer { syncing = false }
+        if let native = NativeMailStore() { store = native }
+        do {
+            accounts = try await store.accounts()
+            mailboxes = try await store.mailboxes()
+            badges = try await store.badgeCounts()
+        } catch {
+            return
+        }
+        // 搜索结果是「这一次查询」的快照，不该被后台刷新冲掉
+        if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await loadMessages()
+        }
     }
 
     /// 每次启动把权限状态与所用数据源追加到 status.txt，方便排查「为什么停在演示模式」
@@ -394,7 +488,12 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiRedactions = []
         aiExempted = false
+        aiUndoDraft = nil
         query = ""
+        // 换邮箱等于换一批邮件：分页和多选都从头来
+        messageLimit = 200
+        selectMode = false
+        multiSelected.removeAll()
         if showAsk { syncAskScopeToSelection() }
         await loadMessages()
     }
@@ -402,11 +501,89 @@ final class AppModel: ObservableObject {    // 数据
     func loadMessages() async {
         guard let id = selectedMailboxID else { return }
         do {
-            messages = try await store.messages(mailboxID: id, limit: 200)
+            messages = try await store.messages(mailboxID: id, limit: messageLimit)
         } catch {
             errorMessage = error.localizedDescription
             messages = []
         }
+    }
+
+    // MARK: - 分页
+
+    /// 是否还有更多：取满一页就认为可能还有。搜索态不翻页（搜的是具体某一封）
+    var canLoadMore: Bool {
+        query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && messages.count >= messageLimit
+    }
+
+    /// 每次翻倍，上限 1000。MailIndex 有缓存，重取一次比增量拼接简单且不会错序
+    func loadMoreMessages() async {
+        guard canLoadMore, messageLimit < 1000 else { return }
+        messageLimit = min(messageLimit * 2, 1000)
+        await loadMessages()
+    }
+
+    // MARK: - 多选
+
+    func toggleSelectMode() {
+        selectMode.toggle()
+        multiSelected.removeAll()
+    }
+
+    func toggleMultiSelect(_ id: String) {
+        if multiSelected.contains(id) {
+            multiSelected.remove(id)
+        } else {
+            multiSelected.insert(id)
+        }
+    }
+
+    /// 全选当前列表里可见的行（会话聚合后仍以原始邮件为准，和列表显示的集合一致）
+    func selectAllVisible() {
+        multiSelected = Set(messages.map(\.id))
+    }
+
+    var multiSelectedMessages: [Message] {
+        messages.filter { multiSelected.contains($0.id) }
+    }
+
+    func requestBatchDelete() {
+        let targets = multiSelectedMessages
+        guard !targets.isEmpty else { return }
+        pendingBatchDelete = targets
+        showBatchDeleteConfirm = true
+    }
+
+    func confirmBatchDelete() async {
+        let targets = pendingBatchDelete
+        pendingBatchDelete = []
+        showBatchDeleteConfirm = false
+        guard !targets.isEmpty else { return }
+        deleting = true
+        defer { deleting = false }
+        var failed = 0
+        for target in targets {
+            do {
+                try await store.moveToTrash(target)
+                if selected?.id == target.id { selected = nil }
+            } catch {
+                failed += 1
+            }
+        }
+        await loadMessages()
+        badges = (try? await store.badgeCounts()) ?? badges
+        mailboxes = (try? await store.mailboxes()) ?? mailboxes
+        let done = targets.count - failed
+        showToast(failed == 0
+                  ? "已移入「邮件」App 的废纸篓：\(done) 封"
+                  : "已删除 \(done) 封，\(failed) 封失败")
+        AuditLog.append(AuditLog.Entry(
+            kind: "delete",
+            action: "manual-batch",
+            messageIDs: targets.map { $0.messageID.isEmpty ? $0.id : $0.messageID },
+            confirmed: true
+        ))
+        selectMode = false
+        multiSelected.removeAll()
     }
 
     // MARK: - 会话聚合
@@ -448,12 +625,20 @@ final class AppModel: ObservableObject {    // 数据
         return messages.filter { threadKey($0) == key }.sorted { $0.date < $1.date }
     }
 
-    func open(_ message: Message) async {        selected = message
+    func open(_ message: Message) async {
+        // 多选态下点行是勾选，不是打开——两种意图不能混在一个点击里
+        if selectMode {
+            toggleMultiSelect(message.id)
+            return
+        }
+        selected = message
         aiOutput = nil
         aiAction = nil
         aiEditing = false
         aiRedactions = []
         aiExempted = false
+        aiUndoDraft = nil
+        replyAll = false
         if message.unread, let idx = messages.firstIndex(where: { $0.id == message.id }) {
             messages[idx].unread = false
         }
@@ -546,9 +731,19 @@ final class AppModel: ObservableObject {    // 数据
         aiEditing = false
         aiRedactions = []
         aiExempted = false
+        // 留一档撤销：改写成功会覆盖当前草稿，模型改坏了得能退回去
+        aiUndoDraft = draft
         requestAI(action: .reply, prompt: prompt, message: m,
                   previousOutput: aiOutput,
                   fallback: { draft })
+    }
+
+    /// 退回改写前的那一版（只有一档）
+    func undoAIRevise() {
+        guard let previous = aiUndoDraft else { return }
+        aiOutput = previous
+        aiUndoDraft = nil
+        showToast("已回到改写前那一版")
     }
 
     func classify() {
@@ -860,6 +1055,8 @@ final class AppModel: ObservableObject {    // 数据
                            previousOutput: String? = nil,
                            fallback: () -> String) {
         let fallbackText = fallback()
+        // 只有「改写」会带旧稿；其余动作都算重新生成，之前那一档撤销随之作废
+        if previousOutput == nil { aiUndoDraft = nil }
 
         // 翻译可以指定专用模型；其余动作走当前主模型
         let resolved: (provider: AIProvider, model: String)?
@@ -908,6 +1105,7 @@ final class AppModel: ObservableObject {    // 数据
             if let previousOutput {
                 // 没有模型就别动用户手里那份草稿
                 aiOutput = previousOutput
+                aiUndoDraft = nil
                 errorMessage = "还没有配置模型，无法改写。点右上角齿轮接入后才能使用。"
             } else {
                 aiOutput = fallbackText + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
@@ -932,6 +1130,7 @@ final class AppModel: ObservableObject {    // 数据
             if let previousOutput {
                 // 拒绝发生在请求之前，草稿本来就没动过——保留它，只提示拒绝原因
                 aiOutput = previousOutput
+                aiUndoDraft = nil
                 errorMessage = "改写被拒绝：\(reason)"
             } else {
                 aiOutput = "已拒绝：\(reason)"
@@ -1069,6 +1268,7 @@ final class AppModel: ObservableObject {    // 数据
                 if let previous = request.previousOutput {
                     // 改写失败：手里那份草稿原样留着，别让一次网络错误把它冲掉
                     aiOutput = previous
+                    aiUndoDraft = nil
                     errorMessage = "改写失败：\(error.localizedDescription)"
                 } else {
                     aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n\(request.fallbackText)"
@@ -1689,7 +1889,8 @@ final class AppModel: ObservableObject {    // 数据
         do {
             let result = try await runAsk(text)
             finishAsk(turn.id, answer: result.answer,
-                      redactions: result.redactions, scanned: result.scanned)
+                      redactions: result.redactions, scanned: result.scanned,
+                      citations: result.citations, tokens: result.tokens)
         } catch {
             let message = "调用失败：\(error.localizedDescription)"
             finishAsk(turn.id, answer: message)
@@ -1698,8 +1899,7 @@ final class AppModel: ObservableObject {    // 数据
     }
 
     /// 真正发请求的那一步。首次提问和「重跑」共用
-    private func runAsk(_ text: String) async throws
-        -> (answer: String, redactions: [Redactor.Mapping], scanned: Int) {
+    private func runAsk(_ text: String) async throws -> AskOutcome {
         guard let provider = ai.activeProvider else { throw AIError.notConfigured }
 
         let model = provider.selectedModel
@@ -1709,7 +1909,7 @@ final class AppModel: ObservableObject {    // 数据
         // 所以它也是一个受策略约束的动作，走同一张表
         let decision = TrustPolicy.decide(action: .ask, trusted: trusted, prefs: prefs.prefs)
         if let reason = decision.denial {
-            return ("已拒绝：\(reason)", [], 0)
+            return AskOutcome(answer: "已拒绝：\(reason)")
         }
 
         // 上锁范围按**本次**模型算，不缓存：中途换模型要换一套可见范围
@@ -1720,7 +1920,7 @@ final class AppModel: ObservableObject {    // 数据
         let rangeText = askRangeLabel
         let requestedAccounts: Set<String>? = askAllAccounts ? nil : askAccounts
         guard requestedAccounts?.isEmpty != true else {
-            return ("还没有选择账号。点左下角的账号胶囊选一个，或选「所有账号」。", [], 0)
+            return AskOutcome(answer: "还没有选择账号。点左下角的账号胶囊选一个，或选「所有账号」。")
         }
         // 上锁账号对不可信模型**整个屏蔽**：不只是查不到邮件，名字也不能进提示词。
         // 账号胶囊是按侧边栏选中项自动填的，用户很可能在浏览上锁账号时顺手提问——
@@ -1730,8 +1930,7 @@ final class AppModel: ObservableObject {    // 数据
         }
         if let requestedAccounts, accountIDs?.isEmpty == true {
             let names = accounts.filter { requestedAccounts.contains($0.id) }.map(\.name)
-            return ("\(names.joined(separator: "、")) 已上锁，当前模型不可信，看不到这个账号的任何邮件。换成可信模型，或先在账号上解锁。",
-                    [], 0)
+            return AskOutcome(answer: "\(names.joined(separator: "、")) 已上锁，当前模型不可信，看不到这个账号的任何邮件。换成可信模型，或先在账号上解锁。")
         }
         // 部分账号被跳过时得说一声：不然用户以为查了两个账号，答案却只覆盖一个
         if let requestedAccounts, let accountIDs, accountIDs.count < requestedAccounts.count {
@@ -1753,7 +1952,7 @@ final class AppModel: ObservableObject {    // 数据
 
         if decision.needsConfirmation {
             let approved = await requestAskConfirmation(provider: provider, model: model)
-            guard approved else { return ("已取消：你取消了这次问答", [], 0) }
+            guard approved else { return AskOutcome(answer: "已取消：你取消了这次问答") }
         }
         // 两道装饰器：先砍上锁的，再砍范围外的。顺序无所谓，都是 fail-closed 的过滤器
         let scoped = AskScopeStore(
@@ -1803,18 +2002,29 @@ final class AppModel: ObservableObject {    // 数据
         \(visibilityNotice(trusted: trusted))
         """
 
+        let usage = UsageBox()
         let answer = try await AIService.chatWithTools(
             provider: provider,
             model: model,
             system: system,
             user: text,
             tools: Self.agentTools(trusted: trusted).map { $0.toolSchema },
+            history: askHistoryForModel,
+            usage: usage,
             redaction: redaction
         ) { call in
             await self.executeToolCall(call, store: scoped, scope: scope, window: window)
         }
 
-        return (redaction.restore(answer), redaction.mappings, scoped.scannedCount)
+        return AskOutcome(
+            answer: redaction.restore(answer),
+            redactions: redaction.mappings,
+            scanned: scoped.scannedCount,
+            citations: scoped.citations.map {
+                AskCitation(id: $0.id, subject: $0.subject, sender: $0.displaySender, date: $0.date)
+            },
+            tokens: usage.total
+        )
     }
 
     // MARK: - 问答确认（不可信模型 + 策略要求确认时）
@@ -1855,6 +2065,8 @@ final class AppModel: ObservableObject {    // 数据
         let text = aiDraftText.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty { aiOutput = aiDraftText }
         aiEditing = false
+        // 手工改过之后，「撤销改写」指向的已经是另一版，别留着误导
+        aiUndoDraft = nil
     }
 
     /// 当前可交付的文本：编辑态取编辑框，否则取原始输出
@@ -1875,12 +2087,15 @@ final class AppModel: ObservableObject {    // 数据
         let subject = message.subject.lowercased().hasPrefix("re:")
             ? message.subject
             : "Re: \(message.subject)"
+        // 回复全部：把原收件人 / 抄送一起带上（去掉自己）。开关默认关，
+        // 因为「回复」在多数场景下只该回到发件人，抄送一群人是需要显式选择的动作
+        let cc = replyAll ? replyAllRecipients(for: message) : []
         let body = text
 
         do {
             try await Task.detached(priority: .userInitiated) {
                 try MailSender.compose(
-                    from: from, to: [to], cc: [], bcc: [],
+                    from: from, to: [to], cc: cc, bcc: [],
                     subject: subject, body: body,
                     delivery: asDraft ? .saveDraft : .sendNow
                 )
@@ -1889,6 +2104,66 @@ final class AppModel: ObservableObject {    // 数据
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+
+    // MARK: - 回复全部 / 转发
+
+    /// "张伟 <zhang@x.com>" → "zhang@x.com"；没有尖括号就整段当地址
+    static func bareAddress(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if let left = trimmed.lastIndex(of: "<"),
+           let right = trimmed.lastIndex(of: ">"),
+           left < right {
+            return String(trimmed[trimmed.index(after: left)..<right])
+                .trimmingCharacters(in: .whitespaces)
+        }
+        return trimmed
+    }
+
+    /// 回复全部的抄送名单：原收件人 + 抄送，去掉自己、去掉已经在收件人里的
+    func replyAllRecipients(for message: Message) -> [String] {
+        let mine = Set(accounts.map { $0.email.lowercased() }.filter { !$0.isEmpty })
+        var seen: Set<String> = [message.senderEmail.lowercased()]
+        var result: [String] = []
+        for raw in message.recipients + message.cc {
+            let address = Self.bareAddress(raw)
+            let key = address.lowercased()
+            guard !address.isEmpty, !mine.contains(key), !seen.contains(key) else { continue }
+            seen.insert(key)
+            result.append(address)
+        }
+        return result
+    }
+
+    /// 界面用它决定要不要显示「回复全部」
+    var hasOtherRecipients: Bool {
+        guard let message = selected else { return false }
+        return !replyAllRecipients(for: message).isEmpty
+    }
+
+    func newCompose() {
+        composePrefill = nil
+        composing = true
+    }
+
+    /// 转发：正文带上原邮件头与原文，交给写邮件窗口，收件人留空由用户填
+    func forward(_ message: Message) {
+        let head = """
+        ---------- 转发的邮件 ----------
+        发件人：\(message.sender) <\(message.senderEmail)>
+        日期：\(message.date.formatted(date: .abbreviated, time: .shortened))
+        主题：\(message.subject)
+        收件人：\(message.recipients.joined(separator: "，"))
+        """
+        composePrefill = ComposePrefill(
+            to: "",
+            cc: "",
+            subject: message.subject.lowercased().hasPrefix("fwd:")
+                ? message.subject
+                : "Fwd: \(message.subject)",
+            body: "\n\n" + head + "\n\n" + message.body
+        )
+        composing = true
     }
 
     // MARK: - 外观
@@ -1989,11 +2264,15 @@ final class AppModel: ObservableObject {    // 数据
     private func finishAsk(_ id: String,
                            answer: String,
                            redactions: [Redactor.Mapping] = [],
-                           scanned: Int? = nil) {
+                           scanned: Int? = nil,
+                           citations: [AskCitation] = [],
+                           tokens: Int? = nil) {
         if let index = askHistory.firstIndex(where: { $0.id == id }) {
             askHistory[index].answer = answer
             askHistory[index].redactions = redactions
             askHistory[index].scanned = scanned
+            askHistory[index].citations = citations
+            askHistory[index].tokens = tokens
         }
         persistAsk()
         askBusy = false
@@ -2058,6 +2337,20 @@ final class AppModel: ObservableObject {    // 数据
         return "\(names.count) 个账号"
     }
 
+    /// 点击回答下方的引用，跳回那封邮件。
+    /// 列表里没有（比如在别的邮箱或范围外）就直接按 id 读出来放进阅读区
+    func openCitedMessage(_ id: String) async {
+        if let message = messages.first(where: { $0.id == id }) {
+            await open(message)
+            return
+        }
+        guard let message = try? await store.message(id: id) else {
+            showToast("这封邮件已经不在了")
+            return
+        }
+        await open(message)
+    }
+
     /// 这个账号当前对问答模型是否不可见（上锁 + 模型不可信）。
     /// 只看「能不能选」不够——真正的拦截在 `runAsk` 里，这里只负责让人提前看懂
     func isAccountHiddenFromAI(_ id: String) -> Bool {
@@ -2070,6 +2363,24 @@ final class AppModel: ObservableObject {    // 数据
         if askAllAccounts { return ["所有账号"] }
         let names = accounts.filter { askAccounts.contains($0.id) }.map(\.name)
         return names.isEmpty ? ["选择账号"] : names
+    }
+
+    /// 交给模型的最近几轮问答。
+    ///
+    /// 只取有答案的、最多 5 轮、总字数封顶 4000——历史越长越贵，
+    /// 而且它只是「让追问能接上话」，不是让模型复习整场对话
+    private var askHistoryForModel: [(question: String, answer: String)] {
+        var picked: [(question: String, answer: String)] = []
+        var budget = 4000
+        for turn in askHistory.reversed() {
+            guard !turn.answer.isEmpty else { continue }
+            let cost = turn.question.count + turn.answer.count
+            if cost > budget { break }
+            budget -= cost
+            picked.append((turn.question, turn.answer))
+            if picked.count >= 5 { break }
+        }
+        return Array(picked.reversed())
     }
 
     /// 当前问答的取件窗口；nil 表示用户选了「忽略」，不限时间。

@@ -399,6 +399,9 @@ struct ReaderView: View {
 
                 aiButton("AI 摘要", icon: "sparkles") { model.summarize() }
                 aiButton("草拟回复", icon: "arrowshape.turn.up.left") { model.draftReply() }
+                if let message = model.selected {
+                    aiButton("转发", icon: "arrowshape.turn.up.right") { model.forward(message) }
+                }
                 aiButton("分类", icon: "tag") { model.classify() }
                 if prefs.prefs.translateEnabled {
                     aiButton("翻译",
@@ -540,6 +543,23 @@ struct ReaderView: View {
                             .buttonStyle(.plain)
                             .disabled(model.aiBusy)
                             .help("按这句话改写上面的草稿；留空则只润色，不改信息")
+
+                            // 模型偶尔越改越糟，留一档撤销比「再让它改回来」可靠
+                            if model.aiUndoDraft != nil, !model.aiBusy {
+                                Button {
+                                    model.undoAIRevise()
+                                } label: {
+                                    Text("撤销")
+                                        .font(.app(11))
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 8)
+                                        .frame(height: 22)
+                                        .background(Color.primary.opacity(0.06), in: Capsule())
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("回到改写前那一版")
+                            }
                         }
                         .padding(.leading, 9)
                         .padding(.trailing, 5)
@@ -569,6 +589,26 @@ struct ReaderView: View {
 
                         // 存草稿 / 发送只对回复有意义，摘要与分类没有收件人概念
                         if model.aiAction == .reply {
+                            // 原邮件还有其他收件人时，才给「回复全部」这个选择
+                            if model.hasOtherRecipients {
+                                Button {
+                                    model.replyAll.toggle()
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: model.replyAll ? "checkmark.circle.fill" : "circle")
+                                            .font(.app(9.5))
+                                        Text("回复全部")
+                                            .font(.app(11))
+                                    }
+                                    .foregroundStyle(model.replyAll ? Theme.accent : Color.secondary)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 24)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .help("把原邮件的其他收件人与抄送一起带上")
+                            }
+
                             resultButton("存草稿", icon: "tray.and.arrow.down", tint: .secondary) {
                                 let text = model.aiDeliverableText
                                 Task { await model.deliverAIOutput(text, asDraft: true) }

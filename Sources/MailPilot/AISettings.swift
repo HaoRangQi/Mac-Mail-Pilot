@@ -387,6 +387,19 @@ enum AIError: LocalizedError {    case notConfigured
     }
 }
 
+/// 一次问答累计的 token 用量。各家协议字段不同，统一在这里累加
+final class UsageBox {
+    private(set) var input = 0
+    private(set) var output = 0
+
+    var total: Int { input + output }
+
+    func add(input newInput: Int, output newOutput: Int) {
+        input += newInput
+        output += newOutput
+    }
+}
+
 enum AIService {
 
     /// 检测对话的默认问题
@@ -442,7 +455,9 @@ enum AIService {
                               system: String,
                               user: String,
                               tools: [[String: Any]],
+                              history: [(question: String, answer: String)] = [],
                               maxRounds: Int = 4,
+                              usage: UsageBox? = nil,
                               redaction: RedactionContext? = nil,
                               execute: @escaping (ToolCall) async throws -> String) async throws -> String {
         guard provider.enabled, !model.isEmpty else { throw AIError.notConfigured }
@@ -453,7 +468,9 @@ enum AIService {
                                                     system: system,
                                                     user: user,
                                                     tools: tools,
+                                                    history: history,
                                                     maxRounds: maxRounds,
+                                                    usage: usage,
                                                     redaction: redaction,
                                                     execute: execute)
         }
@@ -469,8 +486,13 @@ enum AIService {
         // 脱敏必须是**会话级**的：工具结果与后续提问共用同一套占位符编号
         var messages: [[String: Any]] = [
             ["role": "system", "content": redaction?.mask(system) ?? system],
-            ["role": "user", "content": redaction?.mask(user) ?? user],
         ]
+        // 历史问答按原样回放（同样要脱敏：存下来的是还原后的明文）
+        for turn in history {
+            messages.append(["role": "user", "content": redaction?.mask(turn.question) ?? turn.question])
+            messages.append(["role": "assistant", "content": redaction?.mask(turn.answer) ?? turn.answer])
+        }
+        messages.append(["role": "user", "content": redaction?.mask(user) ?? user])
 
         // 换 key 重试必须从同一份上下文重来：否则上一轮插进去的提醒消息会越积越多
         let baseMessages = messages
@@ -515,6 +537,7 @@ enum AIService {
                     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                         throw AIError.emptyResponse("响应不是 JSON（\(data.count) 字节）")
                     }
+                    recordUsage(from: json, into: usage)
                     guard let message = assistantMessage(from: json) else {
                         throw AIError.emptyResponse(describeResponse(json, data))
                     }
@@ -616,7 +639,9 @@ enum AIService {
                                                system: String,
                                                user: String,
                                                tools: [[String: Any]],
+                                               history: [(question: String, answer: String)],
                                                maxRounds: Int,
+                                               usage: UsageBox?,
                                                redaction: RedactionContext?,
                                                execute: @escaping (ToolCall) async throws -> String) async throws -> String {
         let keys = keyCandidates(provider)
@@ -628,9 +653,12 @@ enum AIService {
         }
 
         let maskedSystem = redaction?.mask(system) ?? system
-        var messages: [[String: Any]] = [
-            ["role": "user", "content": redaction?.mask(user) ?? user],
-        ]
+        var messages: [[String: Any]] = []
+        for turn in history {
+            messages.append(["role": "user", "content": redaction?.mask(turn.question) ?? turn.question])
+            messages.append(["role": "assistant", "content": redaction?.mask(turn.answer) ?? turn.answer])
+        }
+        messages.append(["role": "user", "content": redaction?.mask(user) ?? user])
         let anthropicTools = tools.compactMap { item -> [String: Any]? in
             guard let function = item["function"] as? [String: Any],
                   let name = function["name"] as? String else { return nil }
@@ -675,6 +703,7 @@ enum AIService {
                         throw AIError.empty
                     }
 
+                    recordUsage(from: json, into: usage)
                     let text = content
                         .filter { ($0["type"] as? String) == "text" }
                         .compactMap { $0["text"] as? String }
@@ -879,6 +908,23 @@ enum AIService {
             break
         }
         return headers
+    }
+
+    /// 从响应里取 token 用量。三种协议的字段各不相同，取不到就算了——
+    /// 这里只是给用户一个「这次花了多少」的量级，不参与任何决策
+    private static func recordUsage(from json: [String: Any], into usage: UsageBox?) {
+        guard let usage else { return }
+        if let u = json["usage"] as? [String: Any] {
+            // OpenAI: prompt_tokens / completion_tokens；Anthropic: input_tokens / output_tokens
+            let input = u["prompt_tokens"] as? Int ?? u["input_tokens"] as? Int ?? 0
+            let output = u["completion_tokens"] as? Int ?? u["output_tokens"] as? Int ?? 0
+            usage.add(input: input, output: output)
+            return
+        }
+        // Ollama 把计数放在顶层
+        if let input = json["prompt_eval_count"] as? Int {
+            usage.add(input: input, output: json["eval_count"] as? Int ?? 0)
+        }
     }
 
     private static func localTimeout(_ kind: ProviderKind) -> TimeInterval {

@@ -20,7 +20,7 @@ struct MailPilotApp: App {
         .defaultSize(width: 1240, height: 800)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("写邮件") { model.composing = true }
+                Button("写邮件") { model.newCompose() }
                     .keyboardShortcut("n", modifiers: .command)
             }
             CommandGroup(replacing: .appInfo) {

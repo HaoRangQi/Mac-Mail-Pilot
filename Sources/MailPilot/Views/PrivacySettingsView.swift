@@ -25,6 +25,7 @@ struct PrivacySettingsView: View {
                 exemptionSection
                 policySection
                 redactionSection
+                sandboxSection
                 customRulesSection
                 keywordsSection
                 auditSection
@@ -317,6 +318,140 @@ struct PrivacySettingsView: View {
         }
     }
 
+    // MARK: - 试一试
+
+    /// 贴一段真实内容看脱敏效果。
+    ///
+    /// 纯本地执行（`Redactor` 不发任何请求），所以贴真实邮件也不会有外发风险——
+    /// 这一点必须在界面上写明，否则没人敢往里粘东西，功能就白做了
+    private var sandboxSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("试一试")
+                .font(.app(12, weight: .medium))
+
+            Text("贴一段内容看它会被替换成什么。全程在本机执行，不联网、不外发。")
+                .font(.app(11))
+                .foregroundStyle(.tertiary)
+
+            VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    if form.sandboxInput.isEmpty {
+                        Text("例：合同请发 zhang@example.com，电话 13800138000")
+                            .font(.app(11.5, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 9)
+                            .allowsHitTesting(false)
+                    }
+                    TextEditor(text: $form.sandboxInput)
+                        .font(.app(11.5, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .frame(height: 80)
+                        .padding(5)
+                }
+
+                Divider().opacity(0.35)
+
+                HStack(spacing: 8) {
+                    Button {
+                        runSandbox()
+                    } label: {
+                        Text("脱敏")
+                            .font(.app(11.5, weight: .medium))
+                            .foregroundStyle(canRunSandbox ? Color.white : Color.secondary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 24)
+                            .background(canRunSandbox
+                                        ? AnyShapeStyle(Theme.accent)
+                                        : AnyShapeStyle(Color.primary.opacity(0.06)),
+                                        in: Capsule())
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canRunSandbox)
+
+                    Button {
+                        form.sandboxInput = ""
+                        form.sandboxOutput = ""
+                        form.sandboxMappings = []
+                        form.sandboxRan = false
+                    } label: {
+                        Text("清空")
+                            .font(.app(11.5))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 10)
+                            .frame(height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    if form.sandboxRan {
+                        Text(form.sandboxMappings.isEmpty
+                             ? "没有命中任何规则"
+                             : "命中 \(form.sandboxMappings.count) 处")
+                            .font(.app(11))
+                            .foregroundStyle(form.sandboxMappings.isEmpty
+                                             ? AnyShapeStyle(.tertiary)
+                                             : AnyShapeStyle(Theme.moss))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 40)
+            }
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+
+            if form.sandboxRan, !form.sandboxOutput.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("脱敏后")
+                        .font(.app(10.5))
+                        .foregroundStyle(.secondary)
+
+                    Text(form.sandboxOutput)
+                        .font(.app(11.5, design: .monospaced))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+
+                    ForEach(form.sandboxMappings, id: \.placeholder) { mapping in
+                        HStack(spacing: 6) {
+                            Text(mapping.placeholder)
+                                .font(.app(10.5, design: .monospaced))
+                                .foregroundStyle(Theme.gold)
+                            Image(systemName: "arrow.left")
+                                .font(.app(8))
+                                .foregroundStyle(.tertiary)
+                            Text(mapping.original)
+                                .font(.app(10.5, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var canRunSandbox: Bool {
+        !form.sandboxInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func runSandbox() {
+        let text = form.sandboxInput
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let result = Redactor.redact(
+            text,
+            disabledRules: prefs.disabledRedactionRules,
+            customRules: prefs.customRedactionRules,
+            keywords: prefs.redactionKeywords
+        )
+        form.sandboxOutput = result.text
+        form.sandboxMappings = result.mappings
+        form.sandboxRan = true
+    }
+
     // MARK: - 自定义正则规则
 
     private var customRulesSection: some View {
@@ -531,4 +666,9 @@ final class PrivacyForm: ObservableObject {
     @Published var editingRule: CustomRedactionRule?
     /// 审计日志清空后 +1，用来触发大小重算
     @Published var auditVersion = 0
+    /// 脱敏试一试
+    @Published var sandboxInput = ""
+    @Published var sandboxOutput = ""
+    @Published var sandboxMappings: [Redactor.Mapping] = []
+    @Published var sandboxRan = false
 }

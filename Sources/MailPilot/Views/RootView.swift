@@ -50,7 +50,7 @@ struct RootView: View {
         // 强调色改为在各个主按钮上单独 .tint(Theme.accent)。
         .task { await model.load() }
         .sheet(isPresented: $model.composing) {
-            ComposeView()
+            ComposeView(prefill: model.composePrefill)
         }
         .sheet(isPresented: $model.showSettings) {
             SettingsView()
@@ -200,7 +200,7 @@ struct TopBar: View {
             .disabled(model.syncing)
 
             Button {
-                model.composing = true
+                model.newCompose()
             } label: {
                 Label("写邮件", systemImage: "square.and.pencil")
                     .font(.app(12, weight: .medium))

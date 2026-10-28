@@ -313,6 +313,47 @@ struct AskBar: View {
                     .padding(.leading, 17)
                 }
 
+                // 回答读了哪几封，就列哪几封：模型说的话要能点回原文才算数
+                if !turn.citations.isEmpty {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("引用了 \(turn.citations.count) 封邮件")
+                            .font(.app(10))
+                            .foregroundStyle(.tertiary)
+                            .padding(.bottom, 1)
+
+                        ForEach(turn.citations.prefix(5)) { cite in
+                            Button {
+                                Task { await model.openCitedMessage(cite.id) }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "doc.text")
+                                        .font(.app(9))
+                                        .foregroundStyle(.tertiary)
+                                    Text(cite.subject)
+                                        .font(.app(10.5))
+                                        .lineLimit(1)
+                                    Text(cite.sender)
+                                        .font(.app(9.5))
+                                        .foregroundStyle(.tertiary)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 0)
+                                }
+                                .foregroundStyle(inkStrong)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("打开这封邮件")
+                        }
+
+                        if turn.citations.count > 5 {
+                            Text("等 \(turn.citations.count) 封")
+                                .font(.app(9.5))
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .padding(.leading, 17)
+                }
+
                 // 每条回答的操作条：复制、重跑
                 HStack(spacing: 14) {
                     answerAction("复制", icon: "doc.on.doc") {
@@ -355,6 +396,17 @@ struct AskBar: View {
                     Image(systemName: "doc.text.magnifyingglass")
                         .font(.app(9))
                     Text("检索 \(scanned) 封")
+                        .font(.app(10.5))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
+                // 成本要可见，否则用户不知道「随便问问」有多贵
+                if let tokens = turn.tokens, tokens > 0 {
+                    Text("·")
+                        .font(.app(10.5))
+                        .foregroundStyle(.tertiary)
+                    Text("\(tokens) tokens")
                         .font(.app(10.5))
                         .monospacedDigit()
                         .lineLimit(1)

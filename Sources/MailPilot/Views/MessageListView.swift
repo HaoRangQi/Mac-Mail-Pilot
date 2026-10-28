@@ -13,39 +13,128 @@ struct MessageListView: View {
                         row(group.latest, threadCount: group.count)
                         Divider().opacity(0.35).padding(.leading, 24)
                     }
+                    if model.canLoadMore {
+                        loadMoreRow
+                    }
                 }
             }
             .hoverScrollIndicators()
+            if model.selectMode {
+                selectionBar
+            }
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .glassPanel()
+        .alert("移入废纸篓？", isPresented: $model.showBatchDeleteConfirm) {
+            Button("移入废纸篓", role: .destructive) {
+                Task { await model.confirmBatchDelete() }
+            }
+            Button("取消", role: .cancel) { model.pendingBatchDelete = [] }
+        } message: {
+            Text(model.isDemo
+                 ? "选中的 \(model.pendingBatchDelete.count) 封（演示数据）只会从列表移除。"
+                 : "选中的 \(model.pendingBatchDelete.count) 封将在「邮件」App 中移入各自账户的废纸篓，可在那里恢复。")
+        }
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 10) {
             Text(model.query.isEmpty ? model.selectionTitle : "搜索结果")
                 .font(.app(12.5, weight: .semibold))
             Spacer()
             Text("\(model.messages.count) 封")
                 .font(.app(11))
                 .foregroundStyle(.tertiary)
+            // 多选是「批量删除」的入口。搜索态也允许用——搜出来一批再一起删很常见
+            Button(model.selectMode ? "完成" : "选择") {
+                model.toggleSelectMode()
+            }
+            .buttonStyle(.plain)
+            .font(.app(11))
+            .foregroundStyle(model.selectMode ? Theme.accent : Color.secondary)
         }
         .padding(.horizontal, 16)
         .frame(height: 34)
     }
 
+    /// 一页 200 封，翻到底再翻倍。不自动无限拉：那是拿启动时间和内存换一个很少用到的深度
+    private var loadMoreRow: some View {
+        Button {
+            Task { await model.loadMoreMessages() }
+        } label: {
+            Text("加载更多（已显示 \(model.messages.count) 封）")
+                .font(.app(11))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .frame(height: 38)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var selectionBar: some View {
+        VStack(spacing: 0) {
+            Divider().opacity(0.5)
+            HStack(spacing: 12) {
+                Button("全选") { model.selectAllVisible() }
+                    .buttonStyle(.plain)
+                    .font(.app(11))
+                    .foregroundStyle(.secondary)
+
+                Button("清空") { model.multiSelected.removeAll() }
+                    .buttonStyle(.plain)
+                    .font(.app(11))
+                    .foregroundStyle(.secondary)
+                    .disabled(model.multiSelected.isEmpty)
+
+                Spacer()
+
+                Text("已选 \(model.multiSelected.count) 封")
+                    .font(.app(11))
+                    .foregroundStyle(.tertiary)
+
+                Button {
+                    model.requestBatchDelete()
+                } label: {
+                    Text("删除")
+                        .font(.app(11.5, weight: .medium))
+                        .foregroundStyle(model.multiSelected.isEmpty ? Color.secondary : Color.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 24)
+                        .background(model.multiSelected.isEmpty
+                                    ? AnyShapeStyle(Color.primary.opacity(0.06))
+                                    : AnyShapeStyle(Theme.brick),
+                                    in: Capsule())
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(model.multiSelected.isEmpty)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 44)
+        }
+    }
+
     @ViewBuilder
     private func row(_ message: Message, threadCount: Int = 1) -> some View {
         let active = model.selected?.id == message.id
+        let picked = model.multiSelected.contains(message.id)
         Button {
             Task { await model.open(message) }
         } label: {
             HStack(alignment: .top, spacing: 8) {
-                Circle()
-                    .fill(Theme.accent)
-                    .frame(width: 6, height: 6)
-                    .padding(.top, 6)
-                    .opacity(message.unread ? 1 : 0)
+                if model.selectMode {
+                    Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                        .font(.app(12))
+                        .foregroundStyle(picked ? Theme.accent : Color.secondary.opacity(0.5))
+                        .padding(.top, 2)
+                } else {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 6, height: 6)
+                        .padding(.top, 6)
+                        .opacity(message.unread ? 1 : 0)
+                }
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
@@ -86,7 +175,9 @@ struct MessageListView: View {
             .padding(.vertical, UIState.rowPadding)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(active ? Theme.accent.opacity(0.12) : Color.clear)
+                    .fill(active || (model.selectMode && picked)
+                          ? Theme.accent.opacity(0.12)
+                          : Color.clear)
             )
             .padding(.horizontal, 6)
             .contentShape(Rectangle())

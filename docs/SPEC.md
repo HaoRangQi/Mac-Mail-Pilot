@@ -65,6 +65,8 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 - `Package.swift` + SPM 构建（无需 Xcode，`make run` 出 .app）
 - 三栏界面：侧边栏、列表、阅读窗格，Liquid Glass 面板
+- **列表刷新与分页**（0.2.60）：每 60 秒静默刷新一次，切回前台（`didBecomeActive`）再刷一次；后台不刷、搜索态不覆盖结果。不做 FSEvents——`~/Library/Mail` 文件量太大，而读盘走索引缓存（path + mtime + size 未变不重解析），定时轮询更便宜。列表一页 200 封，「加载更多」每次翻倍、上限 1000
+- **多选**（0.2.60）：列表头「选择」切换多选态，点行变勾选；支持全选 / 清空 / 批量删除，删除逐封走 `moveToTrash` 并统计失败数，全程二次确认 + 审计
 - **侧边栏按账号分组**：个人收藏（所有收件箱/旗标/草稿/已发送）+ 智能邮箱（今天）+ 每个账号的收件箱/草稿/已发送/垃圾邮件，带角标；分组可折叠，折叠状态持久化
 - **主题切换**：跟随系统 / 浅色 / 深色，顶栏按钮循环切换，选择持久化
 - **AI 配置面板**（Cherry Studio 式）：多服务商（Ollama 本地 / OpenAI 兼容 / Anthropic，本地优先）、启用开关、API 地址（`/v1` 自动补齐 + 实际请求路径预览）
@@ -83,6 +85,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **设置项「权限管理」置于首位**：未授权的用户可在设置内完成授权，实时显示状态、账号/邮箱数量与权限边界说明；**其中「控制「邮件」App」卡片可主动申请自动化权限**（`AEDeterminePermissionToAutomateTarget`），把系统弹框提前到设置页
 - **关于页**：设置的第四个 Tab（权限管理 / 模型服务 / AI 功能 / 关于），含数据来源、数据位置、隐私说明、打开数据目录；菜单「关于 MailPilot」会打开设置并跳到该 Tab
 - AI 栏三个动作已接真实模型；未配置时回退到本地规则生成，并明确提示
+- **回复全部 / 转发**（0.2.60）：回复全部的抄送 = 原收件人 + 抄送 − 自己 − 已在收件人里的地址，草稿卡上勾选控制、默认关；转发预填 `Fwd:` 主题与原邮件头 + 原文，收件人留空。注意：仍然是新邮件，不带 `In-Reply-To` / `References`（`MailSender.compose` 的限制）
 - **发送双路**：`mailto` 打开撰写窗口；AppleScript 创建撰写窗口，可选"直接发送"
 - **真实删除**：阅读页垃圾桶按钮 → 二次确认 → `MailMutator` 用 AppleScript 让「邮件」App 把邮件移入该账户的废纸篓。`.emlx` 随之移出原邮箱目录、Envelope Index 与 IMAP 服务器同步更新，刷新不会复活；弹框文案如实说明去向。首次执行需在系统弹窗中允许 MailPilot 控制「邮件」（隐私与安全性 → 自动化）。**2026-10-24 实测通过**：native 模式下删除成功，邮件进入 Mail 废纸篓。定位链最终形态见第 3 节
 - 启动状态落盘 `~/Library/Application Support/MailPilot/status.txt`（store 模式 + FDA 状态），诊断文件 `diagnose.txt` 补充 rawName / 账户名 / 邮箱地址 / Message-ID，用于排查权限与定位问题
@@ -98,6 +101,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
   - 总开关「只要用不可信模型，一律先问我」只**追加确认**，不取消动作级已设的脱敏
   - `Redactor` 脱敏：邮箱 / 手机号 / 身份证 / 银行卡 / IP / 金额 / 电话七类内置正则 + 用户自定义正则 + 关键字（纯文本），占位符 `⟨类型N⟩`，返回后按内存映射还原；映射表不落盘不进日志
   - 设置页「隐私与数据」：总开关、五个动作（摘要 / 草拟 / 分类 / 翻译 / 问答）的处置选择、七条规则逐条开关、自定义规则增删改（带实时命中测试）、关键字编辑
+  - **脱敏试一试**（0.2.60）：页面里可直接贴一段文本点「脱敏」，看到替换结果与命中明细。纯本地执行（`Redactor` 不发请求），界面上写明这一点——不写没人敢往里粘真实内容，功能就白做了
   - 脱敏命中明细可见：AI 结果区显示「已脱敏 N 处：类型×n…」，展开逐条「占位符 ← 原始值」
   - 外发确认框可展开逐字检查实际发送的内容（system 与 user 都露出），并提供「脱敏后发送」——用户常是看到确认框才想起这封邮件敏感，不该逼他去改永久策略
 - **AI 工具调用（tool calling）**：`MailTool` 9 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 支持 OpenAI / Anthropic / Ollama 三种协议（上限 4 轮）。**Ollama 有三处形状不同**（0.2.52 实测修正）：消息在顶层 `message` 而不是 `choices[0].message`；`function.arguments` 是对象不是 JSON 字符串；工具结果必须用 `tool_name` 回传，只给 `tool_call_id` 会让模型重复调同一个工具直到轮数耗尽。**工具集按模型信任级别下发**（`agentTools(trusted:)`）：可信/本地模型拿到全部 9 个；不可信模型只有 `searchMessages` / `getMessage` / `listMailboxes` / `moveToTrash`（挂起等确认）/ `sendMessage`（永远确认 + 收件人受限 + 正文不回补）/ `proposeBatch`。`markRead` / `setFlag` / `saveDraft` 这三个写入类**根本没下发给不可信模型**，模型凭记忆发出来也会被拒
@@ -125,6 +129,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **写邮件页 AI**（0.2.37）：主题行下方 AI 条，按意图起草正文；正文非空时切换为「AI 修稿」按意图改写全文。主题作为显式约束写进提示词防跑偏，不填主题则约束不出现。外发内容只有用户意图 + 主题（修稿时含当前正文），不可信模型仍脱敏但**不弹确认**——用户点「AI 起草」本身即明确外发意图，且邮件正文不在外发内容里。**正文非空时留空也能点**（0.2.56）：那就是一键润色，提示词写死「不改原意与信息量，保留称呼、数字、日期和承诺，不新增不省略」——「改写」类指令最容易顺手加戏或删承诺，边界必须写进提示词
 - **AI 问答浮层 AskBar**（0.2.37 / 0.2.54）：Markdown 渲染（`MarkdownText.parse` 按行切块 → `MarkdownRenderer` 拼成一份 `NSAttributedString`）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。**整段回答由一个 `NSTextView`（`SelectableTextView`）承载**——SwiftUI 的 `Text` 一段一个可选区，列表里每条都是独立 `Text`，跨行选中做不到。版式（列表悬挂缩进、代码块底色、引用竖线）由 `NSParagraphStyle` 还原，字号仍读 `UIState`。提问气泡同样 `textSelection(.enabled)`，外层手势用 `simultaneousGesture` 以免吃掉拖选
 - **问答范围（账号 + 时间）**（0.2.48 / 0.2.49 / 0.2.50 / 0.2.51 / 0.2.53）：范围是**数据层**属性，不是提示词建议，也不是每个工具自己的选项。`AskScopeStore` 叠在 `GuardedMailStore` 外面，`search` / `message` / `messages` / 三个写操作统一按「选中账号 + 时间窗口」收口——窗口外的邮件按 ID 也读不到、删不掉。多取几轮再收口（上限 400 条），因为选了「今日」时绝大多数命中都在窗口外。系统提示词写明范围；`listMailboxes` 在有窗口时不报整箱总数；气泡底部显示范围与**本轮实际读到的不同邮件数**（`AskTurn.scanned`），这是范围生效的唯一可见证据。上界取「那天的结束」，否则选到今天会漏掉今天收到的邮件。四个档位：忽略（`askWindow` 为 nil，不限时间）/ 今日（默认）/ 近三天 / 更多（自定义，默认最近 7 天）。0.2.53 起问答只剩一条路径——旧的直连上下文 `ask()` 已删除，建议按钮同样走 `askWithTools`
+  - **带历史 / 可溯源 / 可见成本**（0.2.60）：最近 5 轮问答（总字数上限 4000）随请求一起发，同样过会话级脱敏——存下来的是还原后的明文，不外发前必须重新打码，否则历史会把脱敏绕过去。气泡下方列出 `AskScopeStore` 实际读过的邮件（最多 5 条 + 总数），点击按 id 跳回原文，不依赖模型自己写引用。本轮 token 由 `UsageBox` 累计（OpenAI `usage` / Anthropic `usage` / Ollama 顶层 `prompt_eval_count`），取不到就不显示
 - **AI 问答空响应自愈**（0.2.37）：reasoning 模型 `content` 为空时自动重试一次（`tool_choice: none` + 要求直接回答），仍空则抛 `AIError.emptyResponse(diagnostic)`，诊断含 finish_reason / 是否只思考 / completion_tokens；Anthropic `max_tokens` 提到 4096
 - **邮件正文 HTML 渲染**（0.2.38）：阅读页新增 WKWebView 渲染管线，`EmlxParser` 保留 text/html 原文与带 Content-ID 的内联图片（读上限 800KB → 2MB）。三层防线：`HTMLSanitizer`（Swift 白名单，设计移植自 K-9 Mail，Apache-2.0）管结构与协议 → CSP meta（`default-src 'none'; img-src data:`）管零外联 → DOMPurify（`atDocumentStart` 注入，双许可）管 mXSS；任一环失败整体退回纯文本。链接策略：普通 http/https 直接开系统浏览器，四种危险特征（可见文字域名与实际目标不符 / `brand.com@evil.com` @ 伪装 / punycode 或西里尔希腊混用同形字 / 裸 IP）弹确认展示真实地址，`javascript:` 等危险协议降级为不可点文本。WKWebView 加固：nonPersistent data store、弹窗全掐死、导航 100% 经 App 拦截。cid 图片 App 侧转 data URI（魔法字节定格式，SVG 不认，≤2MB/张、≤30 张）。**域名判定必须从 href 原文解析**——`URL.host` 会把中文域名规范化成 punycode，直接用它会把所有中文域名误判为「易混淆编码」（实测踩坑）。正文字号经 zoom 整体缩放 + calc 补偿联动。方案调研与威胁模型见 `docs/邮件正文HTML渲染方案调研.md`
 - **演示数据正规化**（0.2.38）：五个账号统一人设地址（清除 `me@` 与 example.com 占位）；iCloud 收件箱新增 HTML 演示邮件（cid logo + 正常外链 + 会被拦截的远程题图），演示模式下即可验证渲染全链路；0.2.39 扩充英 / 法 / 俄三封 HTML 演示邮件（五常国家语言全覆盖）

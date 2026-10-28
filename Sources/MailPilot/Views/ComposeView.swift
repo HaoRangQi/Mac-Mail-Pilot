@@ -23,6 +23,8 @@ final class ComposeForm: ObservableObject {
 }
 
 struct ComposeView: View {
+    /// 转发时带进来的初始内容；普通新建为 nil
+    var prefill: ComposePrefill?
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @StateObject private var form = ComposeForm()
@@ -85,6 +87,13 @@ struct ComposeView: View {
         .frame(width: 640)
         .background(.regularMaterial)
         .onAppear {
+            // 转发：只在窗口还是空的时候灌入，避免和用户已经输入的内容打架
+            if let prefill, form.subject.isEmpty, form.bodyText.isEmpty {
+                form.to = prefill.to
+                form.cc = prefill.cc
+                form.subject = prefill.subject
+                form.bodyText = prefill.body
+            }
             if form.fromAccountID.isEmpty {
                 form.fromAccountID = model.accounts.first?.id ?? ""
             }
