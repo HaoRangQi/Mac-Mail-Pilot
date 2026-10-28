@@ -150,7 +150,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - ~~**邮件正文渲染**~~（0.2.38 已实现，含 0.2.39 远程图片放行，见「已完成」节）
 - **本地模型预检（方案B，已评估未实现）**：用本地小模型给邮件打「敏感度 1-10」，高分时把处置从 redact 升级为 confirm/deny。路线首选 macOS 26 的 Foundation Models（`LanguageModelSession`），次选 MLX Swift；llama.cpp 因 0.5B CPU 推理 10-20 token/s、1000 token 邮件要 1 分钟+，不适合交互场景。**小模型只打分、不改写正文**
 - ~~**补开工具**~~（0.2.42 已开放 `markRead` / `setFlag` / `saveDraft`，写入类只给可信模型）
-- **MCP Server**：把同一套 `MailTool` 用 MCP 协议导出，让外部客户端（Claude Desktop 等）连接。真正的障碍是 GUI App 不能对外提供 stdio，需要拆包成 `MailPilotCore` + `mailpilot-mcp` CLI
+- ~~**MCP Server / 第三方 agent 接入**~~（2026-10-28 **决定不做**）：AI 能做的事 App 内已经尽量覆盖，做不到的就地增强功能；外部客户端（Claude Code 等）本就能通过别的 MCP 访问邮件，从 MailPilot 再中转一层没有增量。技术上要做得先把 `MailTool` 等抽成 `MailPilotCore` 库 + `mailpilot-mcp` CLI（GUI App 给不了 stdio），成本只服务这一个功能。**不要再提这个方案**，除非用户主动改主意
 - ~~**审计日志**~~（0.2.42 已实现，JSONL + 5MB × 3 轮转，隐私页可查看 / 清空）
 - **账户级隐私策略**：账号级上锁已覆盖「这个账号的邮件能不能给不可信模型看」；仍缺的是「本地模型 / 可信第三方」分档（例如某些邮件只允许本地模型）
 
