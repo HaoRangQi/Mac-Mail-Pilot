@@ -25,9 +25,9 @@ struct PrivacySettingsView: View {
                 exemptionSection
                 policySection
                 redactionSection
-                sandboxSection
                 customRulesSection
                 keywordsSection
+                sandboxSection
                 auditSection
             }
             .padding(22)
@@ -329,14 +329,20 @@ struct PrivacySettingsView: View {
             Text("试一试")
                 .font(.app(12, weight: .medium))
 
-            Text("贴一段内容看它会被替换成什么。全程在本机执行，不联网、不外发。")
+            Text("按上面启用的内置规则、自定义规则和关键字一起处理——这里看到的就是外发前的真实样子。全程在本机执行，不联网、不外发。")
                 .font(.app(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // 让「覆盖到哪些」一眼可见：只写「脱敏」两个字，用户没法确认关键字到底算不算
+            Text("当前生效：内置规则 \(enabledRuleCount) 条 · 自定义规则 \(enabledCustomRuleCount) 条 · 关键字 \(prefs.redactionKeywords.count) 个")
+                .font(.app(10.5))
                 .foregroundStyle(.tertiary)
 
             VStack(spacing: 0) {
                 ZStack(alignment: .topLeading) {
                     if form.sandboxInput.isEmpty {
-                        Text("例：合同请发 zhang@example.com，电话 13800138000")
+                        Text(sandboxPlaceholder)
                             .font(.app(11.5, design: .monospaced))
                             .foregroundStyle(.tertiary)
                             .padding(.horizontal, 10)
@@ -436,6 +442,23 @@ struct PrivacySettingsView: View {
 
     private var canRunSandbox: Bool {
         !form.sandboxInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var enabledRuleCount: Int {
+        Redactor.ruleInfos.filter { prefs.redactionRules[$0.name] ?? true }.count
+    }
+
+    private var enabledCustomRuleCount: Int {
+        prefs.customRedactionRules.filter(\.enabled).count
+    }
+
+    /// 配了关键字就把第一个放进示例：点一下就能看到 ⟨关键字N⟩ 真的命中，
+    /// 光写「支持关键字」没人会信
+    private var sandboxPlaceholder: String {
+        if let keyword = prefs.redactionKeywords.first {
+            return "例：\(keyword) 的合同请发 zhang@example.com，电话 13800138000"
+        }
+        return "例：合同请发 zhang@example.com，电话 13800138000"
     }
 
     private func runSandbox() {
