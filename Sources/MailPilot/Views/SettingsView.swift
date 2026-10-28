@@ -155,6 +155,12 @@ struct SettingsView: View {
 
     // MARK: - 左侧服务商列表
 
+    /// 列表里内置 Ollama 恒定排第一。只影响展示，不动 `providers` 数组顺序——
+    /// 那个顺序是 `activeProvider` 的优先级，用户切模型时会被重排。
+    private var displayProviders: [AIProvider] {
+        ai.providers.filter(\.isBuiltin) + ai.providers.filter { !$0.isBuiltin }
+    }
+
     private var providerList: some View {
         VStack(spacing: 0) {
             HStack {
@@ -171,7 +177,7 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(spacing: 2) {
-                    ForEach(ai.providers) { provider in
+                    ForEach(displayProviders) { provider in
                         providerRow(provider)
                     }
                 }
@@ -241,6 +247,9 @@ struct SettingsView: View {
                     keySection(provider)
                     baseSection(provider)
                     modelSection(provider)
+                    if provider.kind.isLocal {
+                        recommendedModelSection(provider)
+                    }
                     footer(provider)
                 }
                 .padding(22)
@@ -294,17 +303,27 @@ struct SettingsView: View {
 
             Spacer()
 
-            Button {
-                form.pendingDeleteID = provider.id
-            } label: {
-                Image(systemName: "trash")
-                    .font(.app(12.5, weight: .medium))
-                    .foregroundStyle(Theme.brick.opacity(0.9))
-                    .frame(width: 30, height: 30)
-                    .background(Theme.brick.opacity(0.10), in: Circle())
+            if provider.isBuiltin {
+                Text("内置")
+                    .font(.app(10.5))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .frame(height: 21)
+                    .background(Color.primary.opacity(0.06), in: Capsule())
+                    .help("内置的本地服务商，不可删除；不想用可以关掉右侧开关")
+            } else {
+                Button {
+                    form.pendingDeleteID = provider.id
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.app(12.5, weight: .medium))
+                        .foregroundStyle(Theme.brick.opacity(0.9))
+                        .frame(width: 30, height: 30)
+                        .background(Theme.brick.opacity(0.10), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("删除该服务商")
             }
-            .buttonStyle(.plain)
-            .help("删除该服务商")
 
             Toggle("", isOn: boolBinding(provider, \.enabled))
                 .toggleStyle(.switch)
@@ -373,39 +392,43 @@ struct SettingsView: View {
 
             Spacer(minLength: 8)
 
-            if !provider.kind.isLocal {
-                Toggle("", isOn: Binding(
-                    get: { provider.isTrustedProvider },
-                    set: { ai.setProviderTrusted(provider.id, $0) }
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.small)
-                .help(provider.isTrustedProvider ? "关闭后其下模型全部回到不可信" : "开启后其下模型默认可信")
-            }
+            // 本地也能关：可能是连到别的机器上的 Ollama，或者就是想让本地模型也走脱敏
+            Toggle("", isOn: Binding(
+                get: { provider.isTrustedProvider },
+                set: { ai.setProviderTrusted(provider.id, $0) }
+            ))
+            .toggleStyle(.switch)
+            .labelsHidden()
+            .controlSize(.small)
+            .help(provider.isTrustedProvider
+                  ? "关闭后其下模型按不可信处理：发送前脱敏，产生对外内容时还要你确认"
+                  : "开启后其下模型原样发送，不脱敏也不确认")
         }
         .padding(11)
         .background(trustColor(provider).opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
     }
 
     private func trustIcon(_ provider: AIProvider) -> String {
-        if provider.kind.isLocal { return "lock.shield.fill" }
-        return provider.isTrustedProvider ? "checkmark.shield.fill" : "exclamationmark.shield"
+        guard provider.isTrustedProvider else { return "exclamationmark.shield" }
+        return provider.kind.isLocal ? "lock.shield.fill" : "checkmark.shield.fill"
     }
 
     private func trustColor(_ provider: AIProvider) -> Color {
-        if provider.kind.isLocal { return Theme.moss }
-        return provider.isTrustedProvider ? Theme.moss : Theme.gold
+        provider.isTrustedProvider ? Theme.moss : Theme.gold
     }
 
     private func trustTitle(_ provider: AIProvider) -> String {
-        if provider.kind.isLocal { return "本地模型" }
+        if provider.kind.isLocal {
+            return provider.isTrustedProvider ? "本地模型（默认可信）" : "本地模型（已关闭可信）"
+        }
         return provider.isTrustedProvider ? "可信供应商" : "不可信供应商（默认）"
     }
 
     private func trustDetail(_ provider: AIProvider) -> String {
         if provider.kind.isLocal {
-            return "数据不出本机，无需信任设置"
+            return provider.isTrustedProvider
+                ? "数据不出本机，默认按可信处理。关掉后其下模型也会脱敏、发送前要你确认"
+                : "已关闭可信：即使是本地模型，也按不可信策略脱敏，并在发送前要你确认"
         }
         if provider.isTrustedProvider {
             return "其下模型原样发送，不做脱敏、不弹确认。仅在你确认该服务商的数据政策可信时开启"
@@ -605,6 +628,57 @@ struct SettingsView: View {
             .padding(.horizontal, 10)
             .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
         }
+    }
+
+    /// 推荐模型：给本地模型一个开箱可用的起点，省得对着空白列表不知道填什么
+    private func recommendedModelSection(_ provider: AIProvider) -> some View {
+        let base = AIProvider.recommendedLocalModel
+        // Ollama 的模型名带 tag（:q4_k_m 等），同步过就按实际名字来，否则请求会打到 :latest 上
+        let resolved = provider.availableModels?.first { $0 == base || $0.hasPrefix(base + ":") } ?? base
+        let added = provider.models.contains(resolved)
+        let inUse = provider.selectedModel == resolved
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .font(.app(11))
+                    .foregroundStyle(Theme.moss)
+                Text("推荐模型")
+                    .font(.app(12, weight: .medium))
+                Spacer()
+
+                if inUse {
+                    Text("当前使用")
+                        .font(.app(10.5))
+                        .foregroundStyle(.tertiary)
+                } else if added {
+                    Button("设为当前") {
+                        ai.update(id: provider.id) { $0.selectedModel = resolved }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                } else {
+                    Button("添加到列表") {
+                        ai.update(id: provider.id) {
+                            if !$0.models.contains(resolved) { $0.models.append(resolved) }
+                            if $0.selectedModel.isEmpty { $0.selectedModel = resolved }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Text(resolved)
+                .font(.app(12.5, design: .monospaced))
+                .textSelection(.enabled)
+
+            Text("1B 参数 · 约 672 MB · 轻量快速，适合邮件摘要与问答")
+                .font(.app(11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(11)
+        .background(Theme.moss.opacity(0.06), in: RoundedRectangle(cornerRadius: 9))
     }
 
     private func modelRow(_ provider: AIProvider, _ model: String) -> some View {

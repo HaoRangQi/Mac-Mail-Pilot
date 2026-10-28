@@ -33,7 +33,7 @@ run() {
 
 run guard \
     "$SRC/Models.swift" "$SRC/MailGuard.swift" "$SRC/GuardedMailStore.swift" \
-    "$SRC/Redactor.swift" Tests/guard/main.swift
+    "$SRC/AskScopeStore.swift" "$SRC/Redactor.swift" Tests/guard/main.swift
 
 run index \
     "$SRC/Models.swift" "$SRC/EmlxParser.swift" "$SRC/MailIndex.swift" \

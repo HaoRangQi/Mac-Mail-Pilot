@@ -29,11 +29,16 @@ enum ProviderKind: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .openai: return "gpt-4o-mini"
         case .anthropic: return "claude-sonnet-4-5"
-        case .ollama: return "qwen2.5:7b"
+        // 本地不预置模型：用户机器上装了什么只有 /api/tags 知道，猜一个只会报 model not found
+        case .ollama: return ""
         }
     }
 
     var isLocal: Bool { self == .ollama }
+
+    /// 内置服务商：Ollama 恒存在、不可删除，新增服务商时也不再提供。
+    /// 本地优先是这个 App 的默认姿态，不该让用户先手动建一个才能用。
+    var isBuiltin: Bool { self == .ollama }
 }
 
 struct APIKey: Identifiable, Codable, Hashable {
@@ -95,15 +100,28 @@ struct AIProvider: Identifiable, Codable, Hashable {
     var avatarImage: Data? = nil
     var avatarSeed: Int? = nil
 
-    static func make(kind: ProviderKind) -> AIProvider {
+    /// 内置 Ollama 用固定 id，重启不会换身份。
+    /// 判断「是不是内置」仍然看 kind——老配置里已有的 Ollama 保留原 id
+    /// （翻译路由存的是 id，改 id 会把用户配好的翻译路由打断）。
+    static let builtinLocalID = "builtin.ollama"
+
+    /// 内置 Ollama：模型列表留空，等「同步模型」从 /api/tags 拉真实的。
+    static var builtinLocal: AIProvider {
         AIProvider(
-            name: kind.label,
-            kind: kind,
-            baseURL: kind.defaultBase,
-            models: [kind.defaultModel],
-            selectedModel: kind.defaultModel
+            id: builtinLocalID,
+            name: ProviderKind.ollama.label,
+            kind: .ollama,
+            baseURL: ProviderKind.ollama.defaultBase,
+            models: [],
+            selectedModel: ""
         )
     }
+
+    var isBuiltin: Bool { kind.isBuiltin }
+
+    /// 内置 Ollama 的推荐模型：1B 参数、约 672 MB，跑得动就很流畅。
+    /// 只做推荐展示，不写进默认配置——用户未必 pull 过，硬塞一个不存在的模型只会报错。
+    static let recommendedLocalModel = "minicpm-v-4.7-1b-heretic"
 
     var initial: String {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
@@ -137,13 +155,16 @@ struct AIProvider: Identifiable, Codable, Hashable {
 
     // MARK: - 信任
 
-    /// 供应商是否被标记为可信（未表态 = 不可信）
-    var isTrustedProvider: Bool { trusted ?? false }
+    /// 供应商是否被标记为可信。
+    /// 未表态时：本地默认可信（数据不出本机），第三方默认不可信。
+    /// 本地这一档可以关掉——用户可能连远程 Ollama，或者就是想让本地模型也走脱敏流程。
+    var isTrustedProvider: Bool {
+        if let trusted { return trusted }
+        return kind.isLocal
+    }
 
-    /// 某个模型是否可信。
-    /// 本地模型恒可信——数据不出本机，没有外发风险，不该要求用户去「信任」它。
+    /// 某个模型是否可信
     func isTrusted(_ modelID: String) -> Bool {
-        if kind.isLocal { return true }
         if let override = modelTrust?[modelID] { return override }
         return isTrustedProvider
     }
@@ -173,17 +194,35 @@ final class AISettingsStore: ObservableObject {
             providers = decoded
             migrateLegacyKeys()
         } else {
-            providers = [
-                AIProvider(
-                    name: "DeepSeek",
-                    kind: .openai,
-                    baseURL: "https://api.deepseek.com/v1",
-                    models: ["deepseek-chat", "deepseek-reasoner"],
-                    selectedModel: "deepseek-chat"
-                )
-            ]
+            providers = []
+        }
+        ensureBuiltinLocal()
+        dropLegacyPlaceholderModel()
+    }
+
+    /// 内置 Ollama 恒存在，用户不用自己新建。
+    /// 追加在末尾而不是插到首位——`activeProvider` 取第一个可用项，
+    /// 插到前面会把老用户已经配好的云端服务商顶掉。
+    /// 列表里想让它排第一是渲染层的事（`displayProviders`），不动数组顺序。
+    private func ensureBuiltinLocal() {
+        guard !providers.contains(where: { $0.isBuiltin }) else { return }
+        providers.append(.builtinLocal)
+    }
+
+    /// 0.2.44-0.2.45 给内置 Ollama 塞过一个 `qwen2.5:7b` 占位模型，
+    /// 那只是个名字，用户机器上多半没装。只在「完全等于出厂状态」时清掉，避免误删用户自己加的模型。
+    private func dropLegacyPlaceholderModel() {
+        for index in providers.indices where providers[index].isBuiltin {
+            let provider = providers[index]
+            guard provider.availableModels == nil,
+                  provider.selectedModel == Self.legacyPlaceholderModel,
+                  provider.models == [Self.legacyPlaceholderModel] else { continue }
+            providers[index].models = []
+            providers[index].selectedModel = ""
         }
     }
+
+    private static let legacyPlaceholderModel = "qwen2.5:7b"
 
     /// 把旧的单 apiKey 迁移成一条密钥记录
     private func migrateLegacyKeys() {
@@ -214,10 +253,12 @@ final class AISettingsStore: ObservableObject {
         providers.insert(provider, at: 0)
     }
 
-    /// 可用于对话的服务商及其模型，供快速切换面板分组展示
+    /// 可用于对话的服务商及其模型，供快速切换面板分组展示。
+    /// 内置 Ollama 恒定排第一，其余保持数组原序——展示顺序，不影响 `activeProvider` 的优先级。
     var selectableGroups: [(provider: AIProvider, models: [String])] {
-        providers
-            .filter { $0.enabled && ($0.kind.isLocal || $0.hasKey) }
+        let available = providers.filter { $0.enabled && ($0.kind.isLocal || $0.hasKey) }
+        let ordered = available.filter(\.isBuiltin) + available.filter { !$0.isBuiltin }
+        return ordered
             .map { provider in
                 (provider, provider.models.filter { provider.isChatModel($0) })
             }
@@ -226,11 +267,10 @@ final class AISettingsStore: ObservableObject {
 
     var isConfigured: Bool { activeProvider != nil }
 
-    func add(_ kind: ProviderKind) {
-        providers.append(AIProvider.make(kind: kind))
-    }
-
     func remove(id: String) {
+        // 内置 Ollama 不可删除：不想要可以关掉开关。
+        // 拦在 store 层而不是只藏按钮——以后多一个删除入口也绕不过去。
+        guard let provider = providers.first(where: { $0.id == id }), !provider.isBuiltin else { return }
         providers.removeAll { $0.id == id }
     }
 
@@ -373,7 +413,9 @@ enum AIService {
         var lastError: Error = AIError.notConfigured
         for key in keys {
             do {
-                let data = try await send(url: url, method: "POST", headers: authHeaders(provider.kind, key), body: body)
+                let data = try await send(url: url, method: "POST",
+                                          headers: authHeaders(provider.kind, key), body: body,
+                                          timeout: localTimeout(provider.kind))
                 return try parseChat(data, kind: provider.kind)
             } catch let error as AIError {
                 if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
@@ -430,32 +472,55 @@ enum AIService {
             ["role": "user", "content": redaction?.mask(user) ?? user],
         ]
 
+        // 换 key 重试必须从同一份上下文重来：否则上一轮插进去的提醒消息会越积越多
+        let baseMessages = messages
         var lastError: Error = AIError.notConfigured
         for key in keys {
             do {
+                var messages = baseMessages
                 // 模型偶尔会「只想不做」：这一轮既没有工具调用、也没有正文
                 // （reasoning 模型把 token 全花在思考过程里时很常见）。
                 // 这种情况重试一次并强制它直接回答，比直接报错有用得多。
                 var forceNoTools = false
                 var emptyRetried = false
+                // 轮数用尽时不能只丢一句报错：小模型很容易反复调工具，
+                // 硬报错等于把前面几轮查到的内容全扔了。记下沿途的正文，
+                // 最后一轮还会把工具拿掉强行要一个回答
+                var lastContent: String?
+                var trail: [String] = []
 
-                for _ in 0..<maxRounds {
+                for round in 0..<maxRounds {
+                    let isLastRound = round == maxRounds - 1
+                    if isLastRound {
+                        messages.append([
+                            "role": "user",
+                            "content": "不要再调用工具了。请直接根据上面已经查到的信息回答；没查到就直说没查到。",
+                        ])
+                    }
+
                     var body: [String: Any] = [
                         "model": model,
                         "messages": messages,
                         "temperature": 0.4,
                         "stream": false,
                     ]
-                    if !tools.isEmpty, !forceNoTools { body["tools"] = tools }
+                    // 最后一轮不下发工具：留着它只会再换来一次 tool_calls
+                    if !tools.isEmpty, !forceNoTools, !isLastRound { body["tools"] = tools }
                     if forceNoTools { body["tool_choice"] = "none" }
+                    applyKeepAlive(&body, kind: provider.kind)
 
                     let data = try await send(url: url, method: "POST",
-                                              headers: authHeaders(provider.kind, key), body: body)
-                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let choice = (json["choices"] as? [[String: Any]])?.first,
-                          let message = choice["message"] as? [String: Any] else {
-                        throw AIError.empty
+                                              headers: authHeaders(provider.kind, key), body: body,
+                                              timeout: localTimeout(provider.kind))
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                        throw AIError.emptyResponse("响应不是 JSON（\(data.count) 字节）")
                     }
+                    guard let message = assistantMessage(from: json) else {
+                        throw AIError.emptyResponse(describeResponse(json, data))
+                    }
+
+                    // 有些模型会「一边调工具一边写结论」，这段正文同样有用，先留着
+                    if let content = messageText(message) { lastContent = content }
 
                     let rawCalls = message["tool_calls"] as? [[String: Any]] ?? []
                     if rawCalls.isEmpty {
@@ -470,19 +535,30 @@ enum AIService {
                             ])
                             continue
                         }
-                        throw AIError.emptyResponse(emptyDiagnostic(json, choice, message))
+                        throw AIError.emptyResponse(emptyDiagnostic(json, message))
                     }
+
+                    if isLastRound {
+                        // 最后一轮已经不再下发工具；模型还凭记忆发出来就不再执行——
+                        // 反正没有下一轮，执行了也只会白改数据（删除、发信都是真的）
+                        break
+                    }
+                    trail.append("第 \(round + 1) 轮：" + rawCalls
+                        .compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+                        .joined(separator: "、"))
 
                     // assistant 的原始消息必须原样回传，OpenAI 协议要求上下文里有这段 tool_calls
                     messages.append(message)
 
                     for raw in rawCalls {
                         let callID = raw["id"] as? String ?? UUID().uuidString
-                        guard let function = raw["function"] as? [String: Any],
-                              let name = function["name"] as? String,
-                              let tool = MailTool(rawValue: name) else {
-                            messages.append(["role": "tool", "tool_call_id": callID,
-                                             "content": "工具不存在或无法解析"])
+                        let function = raw["function"] as? [String: Any]
+                        let name = function?["name"] as? String
+                        guard let function, let name, let tool = MailTool(rawValue: name) else {
+                            messages.append(toolResultMessage(kind: provider.kind,
+                                                              callID: callID,
+                                                              name: name ?? "",
+                                                              content: "工具不存在或无法解析"))
                             continue
                         }
 
@@ -491,6 +567,10 @@ enum AIService {
                            !argsText.isEmpty,
                            let argsData = argsText.data(using: .utf8),
                            let parsed = try? JSONSerialization.jsonObject(with: argsData) as? [String: Any] {
+                            // OpenAI 兼容：arguments 是 JSON 字符串
+                            arguments = parsed
+                        } else if let parsed = function["arguments"] as? [String: Any] {
+                            // Ollama：arguments 直接是对象
                             arguments = parsed
                         }
 
@@ -501,11 +581,17 @@ enum AIService {
                             result = "执行失败：\(error.localizedDescription)"
                         }
                         // 工具返回里就是邮件正文和发件人，必须过同一套脱敏
-                        messages.append(["role": "tool", "tool_call_id": callID,
-                                         "content": redaction?.mask(result) ?? result])
+                        messages.append(toolResultMessage(kind: provider.kind,
+                                                          callID: callID,
+                                                          name: name,
+                                                          content: redaction?.mask(result) ?? result))
                     }
                 }
-                throw AIError.empty   // 轮数用尽，模型还在要工具
+                // 轮数用尽。最后一轮已经强行要过回答，还是要不到才走这里：
+                // 有沿途正文就先交出去，总比把查到的内容全扔了强
+                if let lastContent { return lastContent }
+                let detail = trail.isEmpty ? "" : "（\(trail.joined(separator: "；"))）"
+                throw AIError.emptyResponse("模型连续 \(maxRounds) 轮都在请求工具，最后一轮也不肯直接回答\(detail)")
             } catch let error as AIError {
                 if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
                     lastError = error
@@ -556,10 +642,22 @@ enum AIService {
             ]
         }
 
+        let baseMessages = messages
         var lastError: Error = AIError.notConfigured
         for key in keys {
             do {
-                for _ in 0..<maxRounds {
+                var messages = baseMessages
+                // 和 OpenAI / Ollama 那条一样：轮数用尽时留一手，
+                // 最后一轮不下发工具，逼它用已经拿到的信息回答
+                var lastText: String?
+                for round in 0..<maxRounds {
+                    let isLastRound = round == maxRounds - 1
+                    if isLastRound {
+                        messages.append([
+                            "role": "user",
+                            "content": "不要再调用工具了。请直接根据上面已经查到的信息回答；没查到就直说没查到。",
+                        ])
+                    }
                     var body: [String: Any] = [
                         "model": model,
                         "system": maskedSystem,
@@ -567,10 +665,11 @@ enum AIService {
                         "max_tokens": 4096,
                         "temperature": 0.4,
                     ]
-                    if !anthropicTools.isEmpty { body["tools"] = anthropicTools }
+                    if !anthropicTools.isEmpty, !isLastRound { body["tools"] = anthropicTools }
 
                     let data = try await send(url: url, method: "POST",
-                                              headers: authHeaders(provider.kind, key), body: body)
+                                              headers: authHeaders(provider.kind, key), body: body,
+                                              timeout: localTimeout(provider.kind))
                     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                           let content = json["content"] as? [[String: Any]] else {
                         throw AIError.empty
@@ -583,11 +682,13 @@ enum AIService {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     let toolUses = content.filter { ($0["type"] as? String) == "tool_use" }
 
+                    if !text.isEmpty { lastText = text }
                     if toolUses.isEmpty {
                         if !text.isEmpty { return text }
                         let stop = json["stop_reason"] as? String ?? "未知"
                         throw AIError.emptyResponse("stop_reason=\(stop)")
                     }
+                    if isLastRound { break }
 
                     // assistant 的内容块必须原样回传，协议要求上下文里有那段 tool_use
                     messages.append(["role": "assistant", "content": content])
@@ -613,7 +714,8 @@ enum AIService {
                     }
                     messages.append(["role": "user", "content": results])
                 }
-                throw AIError.empty
+                if let lastText { return lastText }
+                throw AIError.emptyResponse("模型连续 \(maxRounds) 轮都在请求工具，最后一轮也不肯直接回答")
             } catch let error as AIError {
                 if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
                     lastError = error
@@ -679,12 +781,52 @@ enum AIService {
         return nil
     }
 
+    /// 工具结果的回传格式两家不同：
+    /// OpenAI 用 `tool_call_id` 对应那次调用；Ollama 用 `tool_name` 对应工具名。
+    /// 实测给 Ollama 只发 `tool_call_id`，模型会认为这次调用没被响应，转头再调一遍同一个工具，
+    /// 四轮用尽也答不出东西。
+    private static func toolResultMessage(kind: ProviderKind,
+                                          callID: String,
+                                          name: String,
+                                          content: String) -> [String: Any] {
+        if kind == .ollama {
+            return ["role": "tool", "tool_name": name, "content": content]
+        }
+        return ["role": "tool", "tool_call_id": callID, "content": content]
+    }
+
+    /// 取出这一轮的 assistant 消息。
+    /// OpenAI 兼容在 `choices[0].message`；Ollama 的 `/api/chat` 直接在顶层 `message`。
+    private static func assistantMessage(from json: [String: Any]) -> [String: Any]? {
+        if let message = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any] {
+            return message
+        }
+        return json["message"] as? [String: Any]
+    }
+
+    /// 结构对不上时的诊断：优先把服务端的报错捞出来，否则把字段名和原文片段给出去，
+    /// 否则用户只看到「模型没有返回内容」，根本无从查起
+    private static func describeResponse(_ json: [String: Any], _ data: Data) -> String {
+        if let error = json["error"] as? [String: Any],
+           let message = error["message"] as? String {
+            return "服务端报错：\(message.prefix(160))"
+        }
+        if let error = json["error"] as? String {
+            return "服务端报错：\(error.prefix(160))"
+        }
+        let keys = json.keys.sorted().joined(separator: ",")
+        let raw = String(decoding: data.prefix(200), as: UTF8.self)
+        return "响应结构不认识（字段：\(keys)；原文：\(raw)）"
+    }
+
     /// 空响应时给一句人话，说明到底是截断了、还是只思考了没输出
-    private static func emptyDiagnostic(_ json: [String: Any],
-                                        _ choice: [String: Any],
-                                        _ message: [String: Any]) -> String {
+    private static func emptyDiagnostic(_ json: [String: Any], _ message: [String: Any]) -> String {
         var parts: [String] = []
-        if let finish = choice["finish_reason"] as? String, !finish.isEmpty {
+        // OpenAI 用 finish_reason，Ollama 用 done_reason，Anthropic 用 stop_reason
+        let finish = (json["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String
+            ?? json["done_reason"] as? String
+            ?? json["stop_reason"] as? String
+        if let finish, !finish.isEmpty {
             parts.append(finish == "length" ? "输出被长度限制截断" : "finish_reason=\(finish)")
         }
         if let reasoning = message["reasoning_content"] as? String, !reasoning.isEmpty {
@@ -693,6 +835,10 @@ enum AIService {
         if let usage = json["usage"] as? [String: Any],
            let out = usage["completion_tokens"] as? Int {
             parts.append("completion_tokens=\(out)")
+        }
+        // Ollama 的统计字段长这样
+        if let out = json["eval_count"] as? Int {
+            parts.append("eval_count=\(out)")
         }
         return parts.isEmpty ? "响应里没有可用的文本" : parts.joined(separator: "；")
     }
@@ -735,10 +881,21 @@ enum AIService {
         return headers
     }
 
+    private static func localTimeout(_ kind: ProviderKind) -> TimeInterval {
+        kind == .ollama ? 180 : 90
+    }
+
+    /// Ollama 默认闲置 5 分钟就把模型卸出内存，下一次提问又要重新加载。
+    /// 一次问答里本来就有好几轮工具调用，中途被卸载会白等一大截，所以让它多留一会儿。
+    private static func applyKeepAlive(_ body: inout [String: Any], kind: ProviderKind) {
+        guard kind == .ollama else { return }
+        body["keep_alive"] = "30m"
+    }
+
     private static func chatBody(kind: ProviderKind, model: String, system: String, user: String) -> [String: Any] {
         switch kind {
         case .openai, .ollama:
-            return [
+            var body: [String: Any] = [
                 "model": model,
                 "messages": [
                     ["role": "system", "content": system],
@@ -747,6 +904,8 @@ enum AIService {
                 "temperature": 0.4,
                 "stream": false,
             ]
+            applyKeepAlive(&body, kind: kind)
+            return body
         case .anthropic:
             return [
                 "model": model,
@@ -758,10 +917,15 @@ enum AIService {
         }
     }
 
-    private static func send(url: URL, method: String, headers: [String: String], body: [String: Any]?) async throws -> Data {
+    /// 本地模型第一次要先把几 GB 的权重读进内存，90 秒对 27B 这种不够用
+    private static func send(url: URL,
+                             method: String,
+                             headers: [String: String],
+                             body: [String: Any]?,
+                             timeout: TimeInterval = 90) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 90
+        request.timeoutInterval = timeout
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -777,18 +941,22 @@ enum AIService {
 
     private static func parseChat(_ data: Data, kind: ProviderKind) throws -> String {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw AIError.empty
+            throw AIError.emptyResponse("响应不是 JSON（\(data.count) 字节）")
         }
-        let text: String?
+        let message: [String: Any]?
         switch kind {
         case .openai:
-            text = ((json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String
+            message = (json["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any]
         case .anthropic:
-            text = (json["content"] as? [[String: Any]])?.first?["text"] as? String
+            // Anthropic 的正文是顶层的 content 块数组，包一层好复用 messageText
+            message = ["content": json["content"] ?? []]
         case .ollama:
-            text = (json["message"] as? [String: Any])?["content"] as? String
+            message = json["message"] as? [String: Any]
         }
-        guard let text, !text.isEmpty else { throw AIError.empty }
+        guard let message else { throw AIError.emptyResponse(describeResponse(json, data)) }
+        guard let text = messageText(message) else {
+            throw AIError.emptyResponse(emptyDiagnostic(json, message))
+        }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

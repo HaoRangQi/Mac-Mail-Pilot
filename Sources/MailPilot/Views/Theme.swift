@@ -137,7 +137,7 @@ struct AppBackground: View {
             ZStack {
                 Color(nsColor: .windowBackgroundColor)
 
-                if hasImage,
+                if settings.backgroundEnabled, hasImage,
                    let image = BackgroundImage.rendered(path: settings.backgroundPath,
                                                         blur: settings.backgroundBlur) {
                     // 用 GeometryReader 给死宽高：`aspectRatio(.fill)` 会按图片比例

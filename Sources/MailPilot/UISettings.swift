@@ -295,6 +295,9 @@ struct UISettings: Codable, Equatable {
 
     // MARK: 背景图
 
+    /// 背景图总开关。关掉只是不显示，图片路径、模糊度、压暗、铺法全部保留，
+    /// 想用时再打开即可——所以它是独立开关，不是「移除」
+    var backgroundEnabled: Bool = true
     /// 已缓存到本机支持目录的图片路径（空 = 不用背景图）
     var backgroundPath: String = ""
     /// 用户看到的来源：本地原文件路径或远程 URL，只用于界面显示
@@ -315,6 +318,7 @@ struct UISettings: Codable, Equatable {
         case readerSize, readerSpacing
         case remoteImages
         case backgroundPath, backgroundSource, backgroundBlur, backgroundDim, backgroundFill
+        case backgroundEnabled
         case customAccentHex
     }
 
@@ -334,6 +338,8 @@ struct UISettings: Codable, Equatable {
         backgroundBlur = try c.decodeIfPresent(Double.self, forKey: .backgroundBlur) ?? 16
         backgroundDim = try c.decodeIfPresent(Double.self, forKey: .backgroundDim) ?? 0.35
         backgroundFill = try c.decodeIfPresent(BackgroundFill.self, forKey: .backgroundFill) ?? .fill
+        // 旧配置没这个键：已经设了图的人要继续看到图，所以缺省是「开」
+        backgroundEnabled = try c.decodeIfPresent(Bool.self, forKey: .backgroundEnabled) ?? true
         customAccentHex = try c.decodeIfPresent(UInt32.self, forKey: .customAccentHex) ?? 0x46734F
     }
 }
@@ -368,10 +374,12 @@ enum UIState {
     static var remoteImagePolicy: RemoteImagePolicy { current.remoteImages }
 
     // 背景图
+    static var backgroundEnabled: Bool { current.backgroundEnabled }
     static var backgroundPath: String { current.backgroundPath }
     static var backgroundBlur: Double { current.backgroundBlur }
     static var backgroundDim: Double { current.backgroundDim }
     static var backgroundFill: BackgroundFill { current.backgroundFill }
+    /// 是否已经设了可用的图。**不看总开关**——设置页要靠它显示「移除」按钮
     static var hasBackgroundImage: Bool {
         !current.backgroundPath.isEmpty && FileManager.default.fileExists(atPath: current.backgroundPath)
     }

@@ -53,21 +53,19 @@ struct PrivacySettingsView: View {
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(ai.providers.filter { $0.enabled }) { provider in
                     HStack(spacing: 6) {
-                        Image(systemName: provider.kind.isLocal
-                              ? "lock.shield.fill"
-                              : (provider.isTrustedProvider ? "checkmark.shield.fill" : "exclamationmark.shield.fill"))
+                        Image(systemName: provider.isTrustedProvider
+                              ? (provider.kind.isLocal ? "lock.shield.fill" : "checkmark.shield.fill")
+                              : "exclamationmark.shield.fill")
                             .font(.app(10))
-                            .foregroundStyle(provider.kind.isLocal || provider.isTrustedProvider
-                                             ? Theme.moss
-                                             : Theme.gold)
+                            .foregroundStyle(provider.isTrustedProvider ? Theme.moss : Theme.gold)
                             .frame(width: 14)
 
                         Text(provider.name)
                             .font(.app(11.5))
 
-                        Text(provider.kind.isLocal
-                             ? "本地 · 不出本机"
-                             : (provider.isTrustedProvider ? "可信 · 原样发送" : "不可信 · 按下方规则管控"))
+                        Text(provider.isTrustedProvider
+                             ? (provider.kind.isLocal ? "本地 · 不出本机" : "可信 · 原样发送")
+                             : (provider.kind.isLocal ? "本地 · 已关闭可信，按下方规则管控" : "不可信 · 按下方规则管控"))
                             .font(.app(11))
                             .foregroundStyle(.secondary)
 

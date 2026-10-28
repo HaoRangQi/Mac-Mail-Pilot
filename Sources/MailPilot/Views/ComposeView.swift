@@ -268,7 +268,8 @@ struct ComposeView: View {
             return "上次：\(last)"
         }
         return hasBody
-            ? "说说要改什么，例如：语气再客气一点，补一句下周给排期"
+            // 留空也能改：直接点「AI 修稿」就是润色，写一句就按你的要求改
+            ? "可选：说说要改什么；留空直接润色"
             : "说说这封邮件要写什么，例如：确认周三评审时间，并要一下排期表"
     }
 
@@ -279,7 +280,7 @@ struct ComposeView: View {
 
     private var draftHelp: String {
         let base = hasBody
-            ? "用 \(model.aiDraftModelLabel) 按你的要求改写当前正文（会连同正文一起发送）"
+            ? "用 \(model.aiDraftModelLabel) 改写当前正文（正文会一起发出去）。不写要求就是润色：更简洁、更礼貌、修语病，不删信息"
             : "用 \(model.aiDraftModelLabel) 根据意图生成正文"
         let subject = form.subject.trimmingCharacters(in: .whitespacesAndNewlines)
         return subject.isEmpty
@@ -287,9 +288,18 @@ struct ComposeView: View {
             : base + "。会紧扣主题「\(subject)」，防止跑偏"
     }
 
+    /// 正文已有内容时，不写要求也允许点——那就是「润色」
     private var canDraft: Bool {
-        !form.drafting && !form.intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard !form.drafting else { return false }
+        return hasBody || !form.intent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    /// 一键润色的默认要求。只改表达，不动信息——
+    /// 「改写」类指令最容易顺手加戏或删掉承诺，这里把边界写死
+    private static let polishInstruction = """
+    在不改变原意和信息量的前提下润色这封邮件：更简洁、更礼貌，修正语病与标点，\
+    保留原有的称呼、数字、日期和承诺，不要新增内容，也不要省略任何要点。
+    """
 
     private func draft() {
         guard canDraft else { return }
@@ -297,10 +307,13 @@ struct ComposeView: View {
         form.drafting = true
         // 先把这次的要求存下来，再把输入框清空——
         // 清空后 placeholder 会显示「上次：…」，用户一眼能回看刚才要了什么
-        let intent = form.intent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = form.intent.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasText = hasBody
+        let intent = typed.isEmpty ? Self.polishInstruction : typed
         let subject = form.subject
         let currentBody = form.bodyText
-        form.lastIntent = intent
+        // 一键润色不算「上次的要求」，别把整段润色提示词塞进占位行
+        form.lastIntent = typed
         form.intent = ""
 
         Task { @MainActor in
@@ -311,13 +324,15 @@ struct ComposeView: View {
                     currentBody: currentBody
                 )
                 form.bodyText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                model.showToast(currentBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? "已生成正文，可直接修改"
-                                : "已按你的要求改好")
+                if !hasText {
+                    model.showToast("已生成正文，可直接修改")
+                } else {
+                    model.showToast(typed.isEmpty ? "已润色正文" : "已按你的要求改好")
+                }
             } catch {
                 form.aiError = error.localizedDescription
                 // 失败时把要求放回输入框，省得重打
-                form.intent = intent
+                form.intent = typed
                 form.lastIntent = ""
             }
             form.drafting = false

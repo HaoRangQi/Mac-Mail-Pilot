@@ -262,6 +262,8 @@ struct AskBar: View {
                 } else {
                     Text(turn.question)
                         .font(.app(11.5))
+                        // 自己发出去的话也得能选中复制——之前是纯 Text，一个字都选不了
+                        .textSelection(.enabled)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 7)
                         // 之前 14% 太淡，几乎看不出这是个气泡；加深并补一圈描边
@@ -274,9 +276,11 @@ struct AskBar: View {
                 }
             }
             .contentShape(Rectangle())
-            .onTapGesture {
+            // 用 simultaneousGesture 而不是 onTapGesture：后者会把拖选手势一起吃掉，
+            // 气泡里的文字就再也选不中了
+            .simultaneousGesture(TapGesture().onEnded {
                 if model.askSelectMode { model.toggleAskSelect(turn.id) }
-            }
+            })
 
             if turn.answer.isEmpty {
                 HStack(spacing: 6) {
@@ -330,6 +334,32 @@ struct AskBar: View {
                     .font(.app(10.5))
                     .lineLimit(1)
                     .truncationMode(.middle)
+
+                // 范围要露出来，否则用户会以为 AI 看过了全部邮件
+                if let range = turn.range {
+                    Text("·")
+                        .font(.app(10.5))
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "calendar")
+                        .font(.app(9))
+                    Text(range)
+                        .font(.app(10.5))
+                        .lineLimit(1)
+                }
+
+                // 范围限制看不见摸不着，用「实际读了几封」这个实数证明它确实生效了
+                if let scanned = turn.scanned {
+                    Text("·")
+                        .font(.app(10.5))
+                        .foregroundStyle(.tertiary)
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.app(9))
+                    Text("检索 \(scanned) 封")
+                        .font(.app(10.5))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
+
                 Spacer(minLength: 4)
                 Text(stamp(turn.date))
                     .font(.app(10.5))
@@ -409,8 +439,7 @@ struct AskBar: View {
             HStack(spacing: 6) {
                 ForEach(model.askSuggestions, id: \.self) { text in
                     Button {
-                        model.askText = text
-                        model.ask()
+                        model.askSuggestion(text)
                     } label: {
                         Text(text)
                             .font(.app(11.5))
@@ -431,7 +460,9 @@ struct AskBar: View {
     // MARK: - 操作范围
 
     private var scopeBar: some View {
-        HStack {
+        // 整行靠左排：账号 → 40pt → 时间范围按钮 →（自定义时）日期。
+        // 不要用 Spacer 把按钮组顶到右边，那是左右分栏的排法，读起来要来回跳
+        HStack(spacing: 0) {
             Button {
                 ui.showScope.toggle()
             } label: {
@@ -472,10 +503,72 @@ struct AskBar: View {
                 scopePanel
             }
 
-            Spacer()
+            Spacer().frame(width: 40)
+
+            rangeBar
+
+            // 选「更多」时日期紧跟在按钮后面，同一行
+            if model.askRange == .custom {
+                Spacer().frame(width: 10)
+                customRangeInline
+            }
+
+            Spacer(minLength: 0)
         }
         .padding(.leading, 2)
     }
+
+    /// 起止日期。`.fixedSize()` 是必须的：HStack 空间不足时会把 DatePicker 压到换行/截断
+    private var customRangeInline: some View {
+        HStack(spacing: 5) {
+            DatePicker("", selection: $model.askRangeStart, displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .fixedSize()
+
+            Text("—")
+                .font(.app(11))
+                .foregroundStyle(.tertiary)
+
+            DatePicker("", selection: $model.askRangeEnd, in: model.askRangeStart..., displayedComponents: .date)
+                .datePickerStyle(.compact)
+                .labelsHidden()
+                .fixedSize()
+        }
+        .fixedSize()
+    }
+
+    /// 时间范围。默认今日——问答把全部历史都翻一遍既慢又没必要，
+    /// 模型拿到几千封也只是挑最近的看
+    private var rangeBar: some View {
+        HStack(spacing: 3) {
+            ForEach(AskDateRange.allCases) { range in
+                let picked = model.askRange == range
+                Button {
+                    model.askRange = range
+                } label: {
+                    Text(range.label)
+                        .font(.app(11))
+                        .foregroundStyle(picked ? Color.primary : inkSoft)
+                        .padding(.horizontal, 9)
+                        .frame(height: 24)
+                        .background(
+                            Capsule().fill(picked ? Theme.accent.opacity(0.18) : Color.primary.opacity(0.05))
+                        )
+                        .overlay(
+                            Capsule().stroke(picked ? Theme.accent.opacity(0.55) : Color.clear, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .help(range == .custom
+                      ? "自定义时间段，默认最近 7 天"
+                      : (range == .unlimited
+                         ? "不限制时间，可检索全部历史邮件（更慢、更费 token）"
+                         : "只看\(range.label)收到的邮件"))
+            }
+        }
+    }
+
 
     private var scopePanel: some View {
         VStack(spacing: 0) {
@@ -524,7 +617,13 @@ struct AskBar: View {
     private func accountRow(_ account: Account) -> some View {
         let dimmed = model.askAllAccounts
         let picked = !dimmed && model.askAccounts.contains(account.id)
+        // 上锁 + 当前模型不可信：这个账号对 AI 完全不存在，连选都别让人选
+        let hidden = model.isAccountHiddenFromAI(account.id)
         return Button {
+            if hidden {
+                model.showToast("\(account.name) 已上锁，不可信模型看不到它的邮件")
+                return
+            }
             model.toggleAskAccount(account.id)
         } label: {
             HStack(spacing: 8) {
@@ -533,17 +632,23 @@ struct AskBar: View {
                     .foregroundStyle(picked ? Theme.accent : Color.secondary.opacity(0.5))
                 Text(account.name)
                     .font(.app(11.5))
-                    .foregroundStyle(dimmed ? Color.secondary : Color.primary)
+                    .foregroundStyle(dimmed || hidden ? Color.secondary : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if hidden {
+                    Image(systemName: "lock.fill")
+                        .font(.app(8.5))
+                        .foregroundStyle(Theme.gold)
+                }
                 Spacer(minLength: 4)
             }
             .padding(.horizontal, 10)
             .frame(height: 34)
-            .opacity(dimmed ? 0.55 : 1)
+            .opacity(hidden ? 0.45 : (dimmed ? 0.55 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(hidden ? "这个账号已上锁，不可信模型看不到它的任何邮件" : "")
     }
 
     // MARK: - 输入

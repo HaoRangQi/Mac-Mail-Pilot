@@ -105,6 +105,27 @@ enum AIAction: String, Hashable {
     }
 }
 
+/// 问答的取件窗口。默认只看当天——每次问答都翻全部历史既慢又没必要，
+/// 模型拿到几千封也只会挑最近几封看，白花 token。
+enum AskDateRange: String, CaseIterable, Identifiable {
+    /// 不设窗口：能查到全部历史，但也更慢、更费 token
+    case unlimited
+    case today
+    case threeDays
+    case custom
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .unlimited: return "忽略"
+        case .today: return "今日"
+        case .threeDays: return "近三天"
+        case .custom: return "更多"
+        }
+    }
+}
+
 struct AskTurn: Identifiable, Codable, Hashable {
     var id: String = UUID().uuidString
     var question: String
@@ -113,19 +134,27 @@ struct AskTurn: Identifiable, Codable, Hashable {
     var accounts: [String] = []
     /// 本轮实际脱敏掉的内容。只在本机显示，不随请求外发
     var redactions: [Redactor.Mapping] = []
+    /// 本轮的时间范围（人话，如「今日」），气泡上要显示——不然用户会以为 AI 看过了全部
+    var range: String? = nil
+    /// 本轮真正读到的不同邮件数。范围限制生效没生效，用户只能靠这个数看出来
+    var scanned: Int? = nil
 
     init(id: String = UUID().uuidString,
          question: String,
          answer: String,
          date: Date = Date(),
          accounts: [String] = [],
-         redactions: [Redactor.Mapping] = []) {
+         redactions: [Redactor.Mapping] = [],
+         range: String? = nil,
+         scanned: Int? = nil) {
         self.id = id
         self.question = question
         self.answer = answer
         self.date = date
         self.accounts = accounts
         self.redactions = redactions
+        self.range = range
+        self.scanned = scanned
     }
 
     /// 旧版本存的历史里没有 `redactions`，缺字段按空处理——
@@ -138,6 +167,8 @@ struct AskTurn: Identifiable, Codable, Hashable {
         date = try container.decodeIfPresent(Date.self, forKey: .date) ?? Date()
         accounts = try container.decodeIfPresent([String].self, forKey: .accounts) ?? []
         redactions = try container.decodeIfPresent([Redactor.Mapping].self, forKey: .redactions) ?? []
+        range = try container.decodeIfPresent(String.self, forKey: .range)
+        scanned = try container.decodeIfPresent(Int.self, forKey: .scanned)
     }
 }
 
@@ -200,6 +231,12 @@ final class AppModel: ObservableObject {    // 数据
     @Published var askAllAccounts = false
     @Published var askAccounts: Set<String> = []
     @Published var askHistory: [AskTurn] = []
+    /// 问答默认只看当天
+    @Published var askRange: AskDateRange = .today
+    /// 「更多」用：默认最近 7 天
+    @Published var askRangeStart: Date = Calendar.current.date(
+        byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: Date())) ?? Date()
+    @Published var askRangeEnd: Date = Date()
     @Published var askSelectMode = false
     @Published var askSelected: Set<String> = []
 
@@ -479,6 +516,39 @@ final class AppModel: ObservableObject {    // 数据
         aiRedactions = []
         aiExempted = false
         requestAI(action: .reply, prompt: prompt, message: m, fallback: { Self.localReply(m) })
+    }
+
+    /// 草稿生成之后再让 AI 改一遍。
+    ///
+    /// 和「起草」分开是为了保住手里这份草稿：失败、被拒绝、用户取消都不能把它冲掉，
+    /// 所以这里把原来的输出一并带进请求，出问题时原样放回去。
+    func reviseAIOutput(instruction: String) {
+        guard let m = selected else { return }
+        let draft = aiDeliverableText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.isEmpty else { return }
+
+        let ask = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        let requirement = ask.isEmpty
+            ? "在不改变原意和信息量的前提下润色：更简洁、更礼貌，修正语病与标点，"
+                + "保留原有的称呼、数字、日期和承诺，不要新增内容，也不要省略要点"
+            : ask
+        let prompt = """
+        下面是我已经写好的一封回复草稿，请按要求改写它。
+        要求：\(requirement)
+        草稿：
+        ---
+        \(draft)
+        ---
+        只输出改写后的回复正文：中文、简洁专业，不要主题行，不要解释你改了什么。
+        """
+
+        aiAction = .reply
+        aiEditing = false
+        aiRedactions = []
+        aiExempted = false
+        requestAI(action: .reply, prompt: prompt, message: m,
+                  previousOutput: aiOutput,
+                  fallback: { draft })
     }
 
     func classify() {
@@ -777,6 +847,8 @@ final class AppModel: ObservableObject {    // 数据
         let simulated: Bool
         /// 审计用：这封邮件是谁。没有 Message-ID 的退回路径 id
         var messageID: String? = nil
+        /// 改写前手里那份结果。失败时原样放回去，不能把用户的草稿冲掉
+        var previousOutput: String? = nil
     }
 
     /// 所有 AI 调用的唯一入口：查策略 → 脱敏 → 需要确认则挂起 → 发送 → 还原。
@@ -785,6 +857,7 @@ final class AppModel: ObservableObject {    // 数据
                            prompt: String,
                            message: Message,
                            route: (provider: AIProvider, model: String)? = nil,
+                           previousOutput: String? = nil,
                            fallback: () -> String) {
         let fallbackText = fallback()
 
@@ -824,14 +897,21 @@ final class AppModel: ObservableObject {    // 数据
                     charCount: redacted.segments[1].count,
                     outboundPreview: redacted.segments[1],
                     simulated: true,
-                    messageID: message.messageID.isEmpty ? message.id : message.messageID
+                    messageID: message.messageID.isEmpty ? message.id : message.messageID,
+                    previousOutput: previousOutput
                 )
                 aiRedactions = redacted.mappings
                 return
             }
 
             aiOutputTrusted = true
-            aiOutput = fallbackText + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
+            if let previousOutput {
+                // 没有模型就别动用户手里那份草稿
+                aiOutput = previousOutput
+                errorMessage = "还没有配置模型，无法改写。点右上角齿轮接入后才能使用。"
+            } else {
+                aiOutput = fallbackText + "\n\n（未配置模型，以上为本地生成。点右上角齿轮接入 AI。）"
+            }
             return
         }
 
@@ -849,7 +929,13 @@ final class AppModel: ObservableObject {    // 数据
                                           exempted: exempted,
                                           protection: guards.level(for: message))
         if let reason = decision.denial {
-            aiOutput = "已拒绝：\(reason)"
+            if let previousOutput {
+                // 拒绝发生在请求之前，草稿本来就没动过——保留它，只提示拒绝原因
+                aiOutput = previousOutput
+                errorMessage = "改写被拒绝：\(reason)"
+            } else {
+                aiOutput = "已拒绝：\(reason)"
+            }
             AuditLog.append(AuditLog.Entry(
                 kind: "deny",
                 action: action.label,
@@ -898,7 +984,8 @@ final class AppModel: ObservableObject {    // 数据
             charCount: outboundSystem.count + outboundUser.count,
             outboundPreview: Self.preview(system: outboundSystem, user: outboundUser),
             simulated: false,
-            messageID: message.messageID.isEmpty ? message.id : message.messageID
+            messageID: message.messageID.isEmpty ? message.id : message.messageID,
+            previousOutput: previousOutput
         )
 
         if decision.needsConfirmation {
@@ -979,7 +1066,13 @@ final class AppModel: ObservableObject {    // 数据
                 ))
             } catch {
                 aiOutputTrusted = true   // 失败后是本地结果，数据没外发
-                aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n\(request.fallbackText)"
+                if let previous = request.previousOutput {
+                    // 改写失败：手里那份草稿原样留着，别让一次网络错误把它冲掉
+                    aiOutput = previous
+                    errorMessage = "改写失败：\(error.localizedDescription)"
+                } else {
+                    aiOutput = "调用失败：\(error.localizedDescription)\n\n--- 本地结果 ---\n\(request.fallbackText)"
+                }
             }
             aiBusy = false
         }
@@ -1167,8 +1260,9 @@ final class AppModel: ObservableObject {    // 数据
     /// 模型不是「被告知别提」，而是根本拿不到。
     func executeToolCall(_ call: ToolCall,
                          store scoped: MailStore,
-                         scope: MailAccessScope) async -> String {
-        let result = await performToolCall(call, store: scoped, scope: scope)
+                         scope: MailAccessScope,
+                         window: DateInterval? = nil) async -> String {
+        let result = await performToolCall(call, store: scoped, scope: scope, window: window)
         recordToolAudit(call, result: result)
         return result
     }
@@ -1188,7 +1282,8 @@ final class AppModel: ObservableObject {    // 数据
 
     private func performToolCall(_ call: ToolCall,
                                  store scoped: MailStore,
-                                 scope: MailAccessScope) async -> String {
+                                 scope: MailAccessScope,
+                                 window: DateInterval? = nil) async -> String {
         // 发送单独成一条路径：它永远要确认，而且确认框里能改收件人
         if call.tool == .sendMessage {
             return await performSend(call, scope: scope)
@@ -1223,8 +1318,13 @@ final class AppModel: ObservableObject {    // 数据
             let query = (call.arguments["query"] as? String ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !query.isEmpty else { return "搜索词为空" }
+            // 多取一轮再按范围收口这件事在 AskScopeStore 里做，这里只声明要几条
             let hits = (try? await scoped.search(query, limit: 10)) ?? []
-            guard !hits.isEmpty else { return "没有找到匹配「\(query)」的邮件" }
+            guard !hits.isEmpty else {
+                return window == nil
+                    ? "没有找到匹配「\(query)」的邮件"
+                    : "在本次问答的时间范围内没有找到匹配「\(query)」的邮件。若确定有，可能需要让用户把范围改成「更多」"
+            }
             return hits.map { m in
                 """
                 - id: \(m.id)
@@ -1237,8 +1337,12 @@ final class AppModel: ObservableObject {    // 数据
 
         case .getMessage:
             let id = call.arguments["message_id"] as? String ?? ""
+            // 窗口外 / 账号外 / 上锁的邮件，AskScopeStore 直接返回 nil——连正文都不读
             guard let message = try? await scoped.message(id: id) else {
-                return "找不到 ID 为 \(id) 的邮件（不存在，或已被保护）"
+                return """
+                找不到 ID 为 \(id) 的邮件：不存在、已被保护，或者不在本次问答的可见范围内。
+                如果确实需要，请让用户把时间范围改成「更多」，或把对应账号加进范围，再问一次
+                """
             }
             // <mail> 标签是给模型的边界标记：里面是数据，不是指令。
             // 挡不住所有提示词注入，但能把「邮件正文里的祈使句被当成命令」这个最常见的情况挡掉大半
@@ -1262,7 +1366,9 @@ final class AppModel: ObservableObject {    // 数据
                 guard !rows.isEmpty else { continue }
                 lines.append("\(account.name)（\(account.email.isEmpty ? "无邮箱地址" : account.email)）")
                 for box in rows {
-                    lines.append("  - \(box.name)：\(box.total) 封")
+                    // 有窗口时报整箱总数是错的：那是「所有时间」的数字，
+                    // 摆在模型面前只会让它以为范围没生效
+                    lines.append(window == nil ? "  - \(box.name)：\(box.total) 封" : "  - \(box.name)")
                 }
             }
             return lines.isEmpty ? "没有邮箱" : lines.joined(separator: "\n")
@@ -1540,7 +1646,9 @@ final class AppModel: ObservableObject {    // 数据
     /// 必须告诉模型「你看不到一部分」。
     /// 静默过滤会让它对「所有 / 统计」类问题给出自信但错误的答案——比泄露更糟，
     /// 因为用户会信。
-    private func visibilityNotice() -> String {
+    private func visibilityNotice(trusted: Bool) -> String {
+        // 可信模型不受上锁限制（见 `MailAccessScope`），对它说「有一部分你看不到」是假话
+        guard !trusted else { return "" }
         let accountCount = guards.lockedAccountCount
         let messageCount = guards.lockedMessageCount
         guard accountCount > 0 || messageCount > 0 else { return "" }
@@ -1554,9 +1662,15 @@ final class AppModel: ObservableObject {    // 数据
     /// 带工具的问答入口
     func askWithTools(_ question: String) async {
         let text = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !askBusy else { return }
+
+        let rangeLabel = askRangeLabel
 
         guard ai.activeProvider != nil else {
+            askHistory.append(AskTurn(question: text,
+                                      answer: "还没有配置模型。点右上角齿轮接入后才能使用问答。",
+                                      accounts: askScopeNames, range: rangeLabel))
+            persistAsk()
             errorMessage = "还没有配置模型。点右上角齿轮接入后才能使用问答。"
             return
         }
@@ -1566,16 +1680,26 @@ final class AppModel: ObservableObject {    // 数据
         // 每次提问重新计算删除配额：上限是防「一次对话里连删」的，不是防长期使用
         sessionTrashCount = 0
 
+        // 先把提问落进历史：调用失败也要留下这一笔。
+        // 只弹一个 alert 的话，用户输入的这段话等于从没存在过，也没法重跑
+        let turn = AskTurn(question: text, answer: "", accounts: askScopeNames, range: rangeLabel)
+        askHistory.append(turn)
+        persistAsk()
+
         do {
             let result = try await runAsk(text)
-            appendAsk(question: text, answer: result.answer, redactions: result.redactions)
+            finishAsk(turn.id, answer: result.answer,
+                      redactions: result.redactions, scanned: result.scanned)
         } catch {
-            errorMessage = "调用失败：\(error.localizedDescription)"
+            let message = "调用失败：\(error.localizedDescription)"
+            finishAsk(turn.id, answer: message)
+            errorMessage = message
         }
     }
 
     /// 真正发请求的那一步。首次提问和「重跑」共用
-    private func runAsk(_ text: String) async throws -> (answer: String, redactions: [Redactor.Mapping]) {
+    private func runAsk(_ text: String) async throws
+        -> (answer: String, redactions: [Redactor.Mapping], scanned: Int) {
         guard let provider = ai.activeProvider else { throw AIError.notConfigured }
 
         let model = provider.selectedModel
@@ -1585,12 +1709,39 @@ final class AppModel: ObservableObject {    // 数据
         // 所以它也是一个受策略约束的动作，走同一张表
         let decision = TrustPolicy.decide(action: .ask, trusted: trusted, prefs: prefs.prefs)
         if let reason = decision.denial {
-            return ("已拒绝：\(reason)", [])
+            return ("已拒绝：\(reason)", [], 0)
         }
 
-        // 范围按**本次**模型算，不缓存：中途换模型要换一套可见范围
+        // 上锁范围按**本次**模型算，不缓存：中途换模型要换一套可见范围
         let scope = MailAccessScope(trusted: trusted, guards: guards)
-        let scoped = GuardedMailStore(inner: store, scope: scope)
+
+        // 窗口和账号都在提问那一刻定死：中途改控件不该让同一轮问答前后口径不一致
+        let window = askWindow
+        let rangeText = askRangeLabel
+        let requestedAccounts: Set<String>? = askAllAccounts ? nil : askAccounts
+        guard requestedAccounts?.isEmpty != true else {
+            return ("还没有选择账号。点左下角的账号胶囊选一个，或选「所有账号」。", [], 0)
+        }
+        // 上锁账号对不可信模型**整个屏蔽**：不只是查不到邮件，名字也不能进提示词。
+        // 账号胶囊是按侧边栏选中项自动填的，用户很可能在浏览上锁账号时顺手提问——
+        // 那种情况下必须说清楚为什么查不了，而不是让模型带着一个空范围硬答
+        let accountIDs = requestedAccounts.map { ids in
+            Set(ids.filter { scope.canRead(accountID: $0) })
+        }
+        if let requestedAccounts, accountIDs?.isEmpty == true {
+            let names = accounts.filter { requestedAccounts.contains($0.id) }.map(\.name)
+            return ("\(names.joined(separator: "、")) 已上锁，当前模型不可信，看不到这个账号的任何邮件。换成可信模型，或先在账号上解锁。",
+                    [], 0)
+        }
+        // 部分账号被跳过时得说一声：不然用户以为查了两个账号，答案却只覆盖一个
+        if let requestedAccounts, let accountIDs, accountIDs.count < requestedAccounts.count {
+            let skipped = accounts
+                .filter { requestedAccounts.subtracting(accountIDs).contains($0.id) }
+                .map(\.name)
+            if !skipped.isEmpty {
+                showToast("\(skipped.joined(separator: "、")) 已上锁，本次只查了其余账号")
+            }
+        }
 
         // 会话级脱敏：system、问题、每一次工具返回共用同一套占位符编号
         let redaction = RedactionContext(
@@ -1602,11 +1753,39 @@ final class AppModel: ObservableObject {    // 数据
 
         if decision.needsConfirmation {
             let approved = await requestAskConfirmation(provider: provider, model: model)
-            guard approved else { return ("已取消：你取消了这次问答", []) }
+            guard approved else { return ("已取消：你取消了这次问答", [], 0) }
+        }
+        // 两道装饰器：先砍上锁的，再砍范围外的。顺序无所谓，都是 fail-closed 的过滤器
+        let scoped = AskScopeStore(
+            inner: GuardedMailStore(inner: store, scope: scope),
+            scope: AskScope(window: window, accountIDs: accountIDs)
+        )
+        let rangeClause: String
+        if let window {
+            let bounds = window.start.formatted(date: .abbreviated, time: .omitted)
+                + " 至 " + window.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)
+            rangeClause = """
+            时间范围：\(rangeText)（\(bounds)）。
+            你只能看到这个范围内的邮件，搜索和读取都会被限制在其中。
+            回答时如果结论依赖时间范围，顺带说一句你查的是哪一段。
+            """
+        } else {
+            rangeClause = "时间范围：不限（用户选了「忽略」）。可以检索全部历史邮件，但优先看最近的。"
+        }
+
+        let accountClause: String
+        if let accountIDs {
+            let names = accounts.filter { accountIDs.contains($0.id) }.map(\.name)
+            accountClause = "账号范围：\(names.joined(separator: "、"))。其他账号的邮件你看不到，也不要假装看过。"
+        } else {
+            accountClause = "账号范围：全部账号。"
         }
 
         let system = """
         你是 MailPilot 的邮件助理。你可以调用工具查询用户的邮件并回答问题。
+
+        \(rangeClause)
+        \(accountClause)
 
         规则：
         - 需要邮件信息时，先 searchMessages 拿 ID，再 getMessage 读正文
@@ -1621,7 +1800,7 @@ final class AppModel: ObservableObject {    // 数据
           不要逐封调用 moveToTrash
         - sendMessage 只发你自己写的内容，不要把读到的邮件原文整段转发出去
         - 回答里如果出现 ⟨类型N⟩ 形式的占位符，原样保留，不要猜测或替换它
-        \(visibilityNotice())
+        \(visibilityNotice(trusted: trusted))
         """
 
         let answer = try await AIService.chatWithTools(
@@ -1632,10 +1811,10 @@ final class AppModel: ObservableObject {    // 数据
             tools: Self.agentTools(trusted: trusted).map { $0.toolSchema },
             redaction: redaction
         ) { call in
-            await self.executeToolCall(call, store: scoped, scope: scope)
+            await self.executeToolCall(call, store: scoped, scope: scope, window: window)
         }
 
-        return (redaction.restore(answer), redaction.mappings)
+        return (redaction.restore(answer), redaction.mappings, scoped.scannedCount)
     }
 
     // MARK: - 问答确认（不可信模型 + 策略要求确认时）
@@ -1760,123 +1939,12 @@ final class AppModel: ObservableObject {    // 数据
         askSelected = []
     }
 
-    func ask() {
-        let question = askText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !question.isEmpty, !askBusy else { return }
-
-        guard let provider = ai.activeProvider else {
-            appendAsk(question: question, answer: "还没有配置模型。点右上角齿轮 →「模型服务」添加一个。")
-            return
-        }
-
-        askBusy = true
+    /// 建议按钮：和手输的问题走同一条带工具的路径。
+    /// 以前这里另有一条「直接拼上下文」的老路：时间范围和账号选择各判各的，
+    /// 同一个问题手输和点建议能查出两套结果——干脆把老路删掉
+    func askSuggestion(_ text: String) {
         askText = ""
-
-        let trusted = provider.isTrusted(provider.selectedModel)
-        let allAccounts = askAllAccounts
-        // 上锁的账号整个排除在操作范围之外——这条路径直接拼上下文，
-        // 不像工具调用那样经过 GuardedMailStore，只能在这里挡
-        var targets = allAccounts ? accounts.map(\.id) : Array(askAccounts)
-        if !trusted {
-            targets = targets.filter { !guards.isAccountLocked($0) }
-        }
-        let scopeText = allAccounts
-            ? "所有账号（\(targets.count) 个）"
-            : "已选账号：" + accounts.filter { targets.contains($0.id) }.map(\.name).joined(separator: "、")
-        let scopeNames = allAccounts ? ["所有账号"] : accounts.filter { targets.contains($0.id) }.map(\.name)
-
-        let turn = AskTurn(question: question, answer: "", accounts: scopeNames)
-        askHistory.append(turn)
-        persistAsk()
-
-        Task { @MainActor in
-            guard !targets.isEmpty else {
-                self.finishAsk(turn.id, answer: "还没有选择账号。点左下角选一个，或选「所有账号」。")
-                return
-            }
-
-            var collected: [Message] = []
-            for accountID in targets {
-                let inboxes = mailboxes.filter { $0.accountID == accountID && $0.role == .inbox }
-                for box in inboxes {
-                    let rows = (try? await store.messages(mailboxID: box.id, limit: 6)) ?? []
-                    collected.append(contentsOf: rows)
-                }
-            }
-            // 邮件级上锁：单封被锁的同样不能进上下文
-            if !trusted {
-                collected = collected.filter { !guards.isLocked($0) }
-            }
-            collected = Array(collected.prefix(15))
-
-            guard !collected.isEmpty else {
-                self.finishAsk(turn.id, answer: "选中的账号里没有邮件。")
-                return
-            }
-
-            let context = collected.map { message in
-                let account = accounts.first { $0.id == message.accountID }?.name ?? ""
-                return "· [\(account)] \(message.displaySender)｜\(message.subject)｜\(message.date.formatted(date: .numeric, time: .shortened))\n  \(message.preview)"
-            }.joined(separator: "\n")
-
-            let prompt = """
-            操作范围：\(scopeText)
-            邮件内容（\(collected.count) 封）：
-            \(context)
-
-            用户问题：\(question)
-            """
-
-            // 这条路径直接拼上下文，不经过 chatWithTools，所以脱敏要在这里单独做一遍
-            let decision = TrustPolicy.decide(action: .ask, trusted: trusted, prefs: prefs.prefs)
-            if let reason = decision.denial {
-                self.finishAsk(turn.id, answer: "已拒绝：\(reason)")
-                return
-            }
-            if decision.needsConfirmation {
-                let approved = await self.requestAskConfirmation(provider: provider,
-                                                                 model: provider.selectedModel)
-                guard approved else {
-                    self.finishAsk(turn.id, answer: "已取消：你取消了这次问答")
-                    return
-                }
-            }
-
-            let system = prefs.systemPrompt(styleSamples: sentSamples)
-            var outboundSystem = system
-            var outboundPrompt = prompt
-            var mappings: [Redactor.Mapping] = []
-            if decision.needsRedaction {
-                let redacted = Redactor.redact(
-                    segments: [system, prompt],
-                    disabledRules: prefs.prefs.disabledRedactionRules,
-                    customRules: prefs.prefs.customRedactionRules,
-                    keywords: prefs.prefs.redactionKeywords
-                )
-                outboundSystem = redacted.segments[0]
-                outboundPrompt = redacted.segments[1]
-                mappings = redacted.mappings
-            }
-
-            do {
-                let text = try await AIService.chat(
-                    provider: provider,
-                    system: outboundSystem,
-                    user: outboundPrompt
-                )
-                let answer = mappings.isEmpty ? text : Redactor.restore(text, mappings)
-                self.finishAsk(turn.id, answer: answer, redactions: mappings)
-            } catch {
-                self.finishAsk(turn.id, answer: "调用失败：\(error.localizedDescription)")
-            }
-        }
-    }
-
-    private func appendAsk(question: String,
-                           answer: String,
-                           redactions: [Redactor.Mapping] = []) {
-        askHistory.append(AskTurn(question: question, answer: answer, redactions: redactions))
-        persistAsk()
+        Task { await askWithTools(text) }
     }
 
     /// 重跑某条提问：保留问题，重新生成回答（覆盖原来的）。
@@ -1891,7 +1959,13 @@ final class AppModel: ObservableObject {    // 数据
         }
 
         let question = askHistory[index].question
+        // 重跑按**当前**的账号与时间范围来，并把气泡上的说明一起更新
+        let rangeLabel = askRangeLabel
+        let scopeNames = askScopeNames
         askHistory[index].answer = ""     // 先清空，界面显示「正在读你的邮箱…」
+        askHistory[index].range = rangeLabel
+        askHistory[index].accounts = scopeNames
+        askHistory[index].scanned = nil
         askBusy = true
         defer { askBusy = false }
 
@@ -1900,6 +1974,9 @@ final class AppModel: ObservableObject {    // 数据
             if let current = askHistory.firstIndex(where: { $0.id == id }) {
                 askHistory[current].answer = result.answer
                 askHistory[current].redactions = result.redactions
+                askHistory[current].range = rangeLabel
+                askHistory[current].accounts = scopeNames
+                askHistory[current].scanned = result.scanned
             }
         } catch {
             if let current = askHistory.firstIndex(where: { $0.id == id }) {
@@ -1909,10 +1986,14 @@ final class AppModel: ObservableObject {    // 数据
         persistAsk()
     }
 
-    private func finishAsk(_ id: String, answer: String, redactions: [Redactor.Mapping] = []) {
+    private func finishAsk(_ id: String,
+                           answer: String,
+                           redactions: [Redactor.Mapping] = [],
+                           scanned: Int? = nil) {
         if let index = askHistory.firstIndex(where: { $0.id == id }) {
             askHistory[index].answer = answer
             askHistory[index].redactions = redactions
+            askHistory[index].scanned = scanned
         }
         persistAsk()
         askBusy = false
@@ -1977,11 +2058,57 @@ final class AppModel: ObservableObject {    // 数据
         return "\(names.count) 个账号"
     }
 
+    /// 这个账号当前对问答模型是否不可见（上锁 + 模型不可信）。
+    /// 只看「能不能选」不够——真正的拦截在 `runAsk` 里，这里只负责让人提前看懂
+    func isAccountHiddenFromAI(_ id: String) -> Bool {
+        guard let provider = ai.activeProvider else { return false }
+        return !provider.isTrusted(provider.selectedModel) && guards.isAccountLocked(id)
+    }
+
     /// 胶囊里逐行展示的名称
     var askScopeNames: [String] {
         if askAllAccounts { return ["所有账号"] }
         let names = accounts.filter { askAccounts.contains($0.id) }.map(\.name)
         return names.isEmpty ? ["选择账号"] : names
+    }
+
+    /// 当前问答的取件窗口；nil 表示用户选了「忽略」，不限时间。
+    /// 上界取「那一天的结束」，否则选到今天会把今天收到的整段漏掉。
+    /// 起止反了也按一天算，不让用户看到空结果还不知道为什么。
+    var askWindow: DateInterval? {
+        let cal = Calendar.current
+        let todayStart = cal.startOfDay(for: Date())
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: todayStart) ?? Date()
+        switch askRange {
+        case .unlimited:
+            return nil
+        case .today:
+            return DateInterval(start: todayStart, end: tomorrow)
+        case .threeDays:
+            let start = cal.date(byAdding: .day, value: -2, to: todayStart) ?? todayStart
+            return DateInterval(start: start, end: tomorrow)
+        case .custom:
+            let start = cal.startOfDay(for: askRangeStart)
+            let lastDay = max(start, cal.startOfDay(for: askRangeEnd))
+            let end = cal.date(byAdding: .day, value: 1, to: lastDay) ?? lastDay
+            return DateInterval(start: start, end: end)
+        }
+    }
+
+    /// 气泡上显示的范围说明
+    var askRangeLabel: String {
+        switch askRange {
+        case .unlimited:
+            return "全部时间"
+        case .today, .threeDays:
+            return askRange.label
+        case .custom:
+            let formatter = DateFormatter()
+            formatter.dateFormat = "M月d日"
+            guard let window = askWindow else { return askRange.label }
+            let last = window.end.addingTimeInterval(-1)
+            return "\(formatter.string(from: window.start))–\(formatter.string(from: last))"
+        }
     }
 
     func toggleAskAccount(_ id: String) {

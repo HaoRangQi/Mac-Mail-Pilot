@@ -74,7 +74,8 @@ func makeMessage(id: String,
                  mailbox: String,
                  subject: String,
                  body: String = "正文",
-                 messageID: String) -> Message {
+                 messageID: String,
+                 date: Date = Date()) -> Message {
     Message(
         id: id,
         accountID: account,
@@ -82,7 +83,7 @@ func makeMessage(id: String,
         subject: subject,
         sender: "测试发件人",
         senderEmail: "sender@example.com",
-        date: Date(),
+        date: date,
         preview: String(body.prefix(40)),
         body: body,
         messageID: messageID
@@ -128,6 +129,8 @@ let boxes = (try? await guarded.mailboxes()) ?? []
 check(!boxes.contains { $0.id == "mb-b-in" }, "listMailboxes 不含锁定账号")
 let visibleAccounts = (try? await guarded.accounts()) ?? []
 check(!visibleAccounts.contains { $0.id == "acc-b" }, "accounts 不含锁定账号")
+// 问答的账号范围也走这条判定：上锁账号从选中集合里被剔掉，名字进不了提示词
+check(!untrusted.canRead(accountID: "acc-b"), "不可信模型看不到上锁账号（问答范围过滤用）")
 
 // MARK: - 2. 可信模型：全部可见
 
@@ -136,6 +139,7 @@ let trusted = MailAccessScope(trusted: true, guards: guards)
 let trustedStore = GuardedMailStore(inner: store, scope: trusted)
 let trustedHits = (try? await trustedStore.search("合同", limit: 10)) ?? []
 check(trustedHits.count == 2, "可信模型能搜到全部 2 封含「合同」的邮件")
+check(trusted.canRead(accountID: "acc-b"), "可信模型可见上锁账号（不额外屏蔽）")
 check((try? await trustedStore.message(id: secret.id)) != nil, "可信模型能读锁定邮件")
 
 // MARK: - 3. 写操作同样受锁约束
@@ -207,6 +211,61 @@ check(ctx.mappings.count == 2, "两段合计 2 条映射（邮箱 + 手机号）
 let off = RedactionContext(enabled: false)
 check(off.mask("alice@corp.com") == "alice@corp.com", "关闭时不改动任何内容")
 check(off.mappings.isEmpty, "关闭时没有映射")
+
+// MARK: - 8. 问答范围（账号 + 时间窗口）
+
+print("\n[8] 问答范围")
+let scopeStore = FakeStore()
+scopeStore.accountRows = [
+    Account(id: "acc-a", name: "普通账号", email: "a@example.com"),
+    Account(id: "acc-b", name: "工作账号", email: "b@example.com"),
+]
+scopeStore.boxRows = [
+    Mailbox(id: "mb-a-in", accountID: "acc-a", name: "收件箱", role: .inbox, total: 2),
+    Mailbox(id: "mb-b-in", accountID: "acc-b", name: "收件箱", role: .inbox, total: 1),
+]
+let now = Date()
+let todayStart = Calendar.current.startOfDay(for: now)
+let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: todayStart) ?? now
+let todayMail = makeMessage(id: "scope:1", account: "acc-a", mailbox: "mb-a-in",
+                            subject: "今天的合同", messageID: "<s1@x>",
+                            date: todayStart.addingTimeInterval(3600))
+let oldMail = makeMessage(id: "scope:2", account: "acc-a", mailbox: "mb-a-in",
+                          subject: "去年的合同", messageID: "<s2@x>",
+                          date: todayStart.addingTimeInterval(-200 * 86_400))
+let otherAccountMail = makeMessage(id: "scope:3", account: "acc-b", mailbox: "mb-b-in",
+                                   subject: "另一个账号的合同", messageID: "<s3@x>",
+                                   date: todayStart.addingTimeInterval(3600))
+scopeStore.messageRows = [todayMail, oldMail, otherAccountMail]
+
+let windowed = AskScopeStore(
+    inner: scopeStore,
+    scope: AskScope(window: DateInterval(start: todayStart, end: tomorrow), accountIDs: ["acc-a"])
+)
+let windowHits = (try? await windowed.search("合同", limit: 10)) ?? []
+check(windowHits.map(\.id) == ["scope:1"], "只返回窗口内、选中账号的邮件")
+check((try? await windowed.message(id: oldMail.id)) == nil, "窗口外的邮件按 ID 也读不到")
+check((try? await windowed.message(id: otherAccountMail.id)) == nil, "账号外的邮件按 ID 读不到")
+check(windowed.scannedCount == 1, "scannedCount 只数真正交出去的邮件")
+
+let scopedBoxes = (try? await windowed.mailboxes()) ?? []
+check(!scopedBoxes.contains { $0.accountID == "acc-b" }, "邮箱列表按账号收口")
+let scopedAccounts = (try? await windowed.accounts()) ?? []
+check(scopedAccounts.map(\.id) == ["acc-a"], "账号列表按选择收口")
+
+var refused = false
+do {
+    try await windowed.moveToTrash(oldMail)
+} catch {
+    refused = true
+}
+check(refused, "窗口外的邮件不能删")
+check(scopeStore.messageRows.contains { $0.id == oldMail.id }, "被拒绝的删除没有真的执行")
+
+// 「忽略」+ 所有账号：什么都不该挡
+let openScope = AskScopeStore(inner: scopeStore, scope: AskScope(window: nil, accountIDs: nil))
+let openHits = (try? await openScope.search("合同", limit: 10)) ?? []
+check(openHits.count == 3, "不限范围时三封都能搜到")
 
 // MARK: - 结果
 

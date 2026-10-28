@@ -100,7 +100,7 @@ struct ModelQuickPicker: View {
                     .truncationMode(.middle)
                 Spacer(minLength: 8)
 
-                if !provider.kind.isLocal, !provider.isTrusted(modelID) {
+                if !provider.isTrusted(modelID) {
                     Image(systemName: "exclamationmark.shield.fill")
                         .font(.app(9))
                         .foregroundStyle(Theme.gold)

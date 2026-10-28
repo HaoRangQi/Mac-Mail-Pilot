@@ -6,7 +6,8 @@ final class AddProviderForm: ObservableObject {
     @Published var name = ""
     @Published var apiKey = ""
     @Published var baseURL = ""
-    @Published var kind: ProviderKind = .ollama
+    // Ollama 是内置的，这里只建自定义服务商
+    @Published var kind: ProviderKind = .openai
     @Published var model = ""
     @Published var reveal = false
     @Published var avatarImage: Data?
@@ -175,7 +176,8 @@ struct AddProviderView: View {
             Text("端点设置").font(.app(12, weight: .medium))
 
             Picker("", selection: $form.kind) {
-                ForEach(ProviderKind.allCases) { kind in
+                // Ollama 已内置且不可删除，这里不再提供，免得出现两个
+                ForEach(ProviderKind.allCases.filter { !$0.isBuiltin }) { kind in
                     Text(kind.label).tag(kind)
                 }
             }

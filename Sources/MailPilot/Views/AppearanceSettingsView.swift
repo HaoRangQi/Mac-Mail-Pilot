@@ -290,6 +290,16 @@ struct AppearanceSettingsView: View {
             header("背景图", "图片会拷一份到本机缓存（Application Support/MailPilot），原文件移动或删除都不影响显示")
 
             card {
+                // 独立于「移除」：关掉只是不显示，图片与参数都留着
+                row("启用背景图", hint: "临时关掉，回到默认背景；图片和下面的参数都保留，随时能再打开") {
+                    Toggle("", isOn: binding(\.backgroundEnabled))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.small)
+                }
+
+                divider
+
                 row("当前背景", hint: nil) {
                     HStack(spacing: 8) {
                         Text(sourceLabel)

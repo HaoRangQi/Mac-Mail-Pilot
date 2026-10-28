@@ -17,6 +17,9 @@ private struct OptionalHelp: ViewModifier {
 /// 阅读区自己的临时状态（不进 UserDefaults：折叠只是当下想多看几行正文）
 final class ReaderUIState: ObservableObject {
     @Published var aiCollapsed = false
+    /// 草稿的改写要求。「草拟回复」出来的东西基本都要改几遍，
+    /// 每次从头起草太浪费，这里存一句话，点「改写」就地重写
+    @Published var reviseText = ""
 }
 
 struct ReaderView: View {
@@ -506,6 +509,45 @@ struct ReaderView: View {
                         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
                     }
 
+                    // 草稿几乎都要改好几遍。原来只有「编辑」能手工改，
+                    // 想让 AI 重写只能再点一次「草拟回复」，等于从头来过
+                    if model.aiAction == .reply, !model.aiEditing {
+                        HStack(spacing: 7) {
+                            Image(systemName: "wand.and.stars")
+                                .font(.app(10.5))
+                                .foregroundStyle(Theme.aiButtonGradient)
+
+                            TextField("让它改：例如再短一点、语气更客气（留空＝润色）",
+                                      text: $ui.reviseText)
+                                .textFieldStyle(.plain)
+                                .font(.app(11.5))
+                                .onSubmit { revise() }
+
+                            Button {
+                                revise()
+                            } label: {
+                                Text(model.aiBusy ? "改写中…" : "改写")
+                                    .font(.app(11, weight: .medium))
+                                    .foregroundStyle(model.aiBusy ? Color.secondary : Color.white)
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 22)
+                                    .background(model.aiBusy
+                                                ? AnyShapeStyle(Color.primary.opacity(0.06))
+                                                : AnyShapeStyle(Theme.accent),
+                                                in: Capsule())
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(model.aiBusy)
+                            .help("按这句话改写上面的草稿；留空则只润色，不改信息")
+                        }
+                        .padding(.leading, 9)
+                        .padding(.trailing, 5)
+                        .frame(height: 30)
+                        .background(Color.primary.opacity(0.04), in: Capsule())
+                        .overlay(Capsule().stroke(Color.primary.opacity(0.07), lineWidth: 0.5))
+                    }
+
                     HStack(spacing: 8) {
                         if model.aiEditing {
                             resultButton("完成", icon: "checkmark", tint: Theme.moss) {
@@ -677,6 +719,14 @@ struct ReaderView: View {
             .glassEffect(.regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
+    }
+
+    /// 把输入框里那句话交给 AI 重写当前草稿。留空＝只润色
+    private func revise() {
+        guard !model.aiBusy else { return }
+        let typed = ui.reviseText
+        ui.reviseText = ""
+        model.reviseAIOutput(instruction: typed)
     }
 
     // MARK: - 复制与日期

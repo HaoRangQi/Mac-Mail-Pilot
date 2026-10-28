@@ -254,17 +254,20 @@ struct TopBar: View {
 
     private var trustBadge: String {
         guard let provider = model.ai.activeProvider else { return "cpu" }
-        if provider.kind.isLocal { return "lock.shield.fill" }
-        return provider.isTrusted(provider.selectedModel) ? "checkmark.shield.fill" : "exclamationmark.shield.fill"
+        guard provider.isTrusted(provider.selectedModel) else { return "exclamationmark.shield.fill" }
+        return provider.kind.isLocal ? "lock.shield.fill" : "checkmark.shield.fill"
     }
 
     private var modelPickerHelp: String {
         guard let provider = model.ai.activeProvider else {
             return "还没有可用模型，点击配置"
         }
-        let trust = provider.isTrusted(provider.selectedModel)
-            ? (provider.kind.isLocal ? "本地模型，数据不出本机" : "可信模型")
-            : "不可信模型，发送前会脱敏"
+        let trust: String
+        if provider.isTrusted(provider.selectedModel) {
+            trust = provider.kind.isLocal ? "本地模型，数据不出本机" : "可信模型"
+        } else {
+            trust = provider.kind.isLocal ? "本地模型（已关闭可信），发送前会脱敏" : "不可信模型，发送前会脱敏"
+        }
         return "当前模型：\(provider.displayName(for: provider.selectedModel))（\(trust)）\n点击切换"
     }
 

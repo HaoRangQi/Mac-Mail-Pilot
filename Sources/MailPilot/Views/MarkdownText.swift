@@ -12,13 +12,10 @@ struct MarkdownText: View {
     var baseSize: CGFloat = 12
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(Array(Self.parse(text).enumerated()), id: \.offset) { _, block in
-                view(for: block)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .textSelection(.enabled)
+        // 整段交给一个 NSTextView：SwiftUI 的 Text 是「一段一个可选区」，
+        // 列表里的每一条都是独立的 Text，拖选到行尾就断，整段复制做不到
+        SelectableTextView(blocks: Self.parse(text), baseSize: baseSize)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - 块
@@ -33,87 +30,13 @@ struct MarkdownText: View {
         case rule
     }
 
-    @ViewBuilder
-    private func view(for block: Block) -> some View {
-        switch block {
-        case .paragraph(let text):
-            inline(text)
-
-        case .heading(let level, let text):
-            inline(text)
-                .font(.app(baseSize + (level == 1 ? 4 : level == 2 ? 2.5 : 1.5), weight: .semibold))
-                .padding(.top, 2)
-
-        case .bullets(let items):
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("•")
-                            .font(.app(baseSize))
-                            .foregroundStyle(.secondary)
-                        inline(item)
-                    }
-                }
-            }
-
-        case .ordered(let items):
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(item.0).")
-                            .font(.app(baseSize, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        inline(item.1)
-                    }
-                }
-            }
-
-        case .code(let code):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .font(.app(baseSize - 1, design: .monospaced))
-                    .padding(9)
-                    .textSelection(.enabled)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
-
-        case .quote(let text):
-            HStack(alignment: .top, spacing: 8) {
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: 2)
-                inline(text)
-                    .foregroundStyle(.secondary)
-            }
-
-        case .rule:
-            Divider().opacity(0.3)
-        }
-    }
-
-    private func inline(_ string: String) -> some View {
-        let text: Text
-        if let attributed = try? AttributedString(
-            markdown: string,
-            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        ) {
-            text = Text(Self.safeLinks(in: attributed))
-        } else {
-            text = Text(string)
-        }
-        // 逐段启用选择：只在外层容器上挂 textSelection 时，
-        // 鼠标拖选在某些容器（LazyVStack / ScrollView 组合）里会失效
-        return text.textSelection(.enabled)
-    }
-
     /// 模型输出里的链接也要过一遍 `LinkPolicy`。
     ///
     /// 邮件正文那条防线（`HTMLSanitizer`）管不到 AI 回答，而 SwiftUI 的 `Text`
     /// 会把 markdown 链接直接渲染成可点的——一封恶意邮件只要诱导模型输出
     /// `[点这里](file:///Applications/xxx.app)`，用户一点就启动了本地程序。
     /// 这里把「危险特征」的链接降级成不可点文本，和邮件正文同一套判定。
-    private static func safeLinks(in attributed: AttributedString) -> AttributedString {
+    static func safeLinks(in attributed: AttributedString) -> AttributedString {
         var output = attributed
         var doomed: [Range<AttributedString.Index>] = []
 
