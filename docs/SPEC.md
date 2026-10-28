@@ -74,7 +74,8 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **AI 功能层**（对标 Spark）：个性化（简介可一键生成 / 自定义指令）、写作与回复（语气 / 长度 / 学习写作风格 / 写作样本 / 快速回复）、翻译（35 种语言 + 搜索）；所有偏好按固定顺序拼进系统提示词，自定义指令优先级最高
 - **浮动 AI 问答框**（⌘K）：按账号选择操作范围（所有账号 / 手动多选），对话历史持久化，支持单条删除、批量删除、清空
 - **本地优先提示**：端点设置处提示推荐本地模型，选中 Ollama 时显示"邮件内容不出本机"
-- **真实邮件接入**：`MailAccess` 检测完全磁盘访问权限，`NativeMailStore` 直读 `~/Library/Mail` 的 `.emlx`；`EmlxParser` 支持 RFC2047 中文标题、base64 / quoted-printable、multipart 取 text/plain- **首次启动引导**：未授权时弹出四步引导（打开系统设置 → 隐私与安全性 → 完全磁盘访问 → 重新检测），可"先用演示数据"跳过
+- **真实邮件接入**：`MailAccess` 检测完全磁盘访问权限，`NativeMailStore` 直读 `~/Library/Mail` 的 `.emlx`；`EmlxParser` 支持 RFC2047 中文标题、base64 / quoted-printable、multipart 取 text/plain
+- **首次启动引导**：未授权时弹出四步引导（打开系统设置 → 隐私与安全性 → 完全磁盘访问 → 重新检测），可"先用演示数据"跳过
 - **设置项「权限管理」置于首位**：未授权的用户可在设置内完成授权，实时显示状态、账号/邮箱数量与权限边界说明；**其中「控制「邮件」App」卡片可主动申请自动化权限**（`AEDeterminePermissionToAutomateTarget`），把系统弹框提前到设置页
 - **关于页**：设置的第四个 Tab（权限管理 / 模型服务 / AI 功能 / 关于），含数据来源、数据位置、隐私说明、打开数据目录；菜单「关于 MailPilot」会打开设置并跳到该 Tab
 - AI 栏三个动作已接真实模型；未配置时回退到本地规则生成，并明确提示
@@ -91,10 +92,10 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
   - `AppModel.requestAI()` 是唯一 AI 入口：查策略 → 脱敏（**system 与 user 一起**，共用一套占位符编号）→ 需确认则挂起 → 发送 → 还原
   - 总开关「只要用不可信模型，一律先问我」只**追加确认**，不取消动作级已设的脱敏
   - `Redactor` 脱敏：邮箱 / 手机号 / 身份证 / 银行卡 / IP / 金额 / 电话七类内置正则 + 用户自定义正则 + 关键字（纯文本），占位符 `⟨类型N⟩`，返回后按内存映射还原；映射表不落盘不进日志
-  - 设置页「隐私与数据」：总开关、四个动作的处置选择、七条规则逐条开关、自定义规则增删改（带实时命中测试）、关键字编辑
+  - 设置页「隐私与数据」：总开关、五个动作（摘要 / 草拟 / 分类 / 翻译 / 问答）的处置选择、七条规则逐条开关、自定义规则增删改（带实时命中测试）、关键字编辑
   - 脱敏命中明细可见：AI 结果区显示「已脱敏 N 处：类型×n…」，展开逐条「占位符 ← 原始值」
   - 外发确认框可展开逐字检查实际发送的内容（system 与 user 都露出），并提供「脱敏后发送」——用户常是看到确认框才想起这封邮件敏感，不该逼他去改永久策略
-- **AI 工具调用（tool calling）**：`MailTool` 8 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 实现 OpenAI 协议循环（上限 4 轮）。已开放：`searchMessages` / `getMessage` / `listMailboxes` / `moveToTrash`（挂起等确认）/ `sendMessage`（0.2.41，永远确认 + 收件人受限 + 正文不回补）。`markRead` / `setFlag` / `saveDraft` 未开放，也不再出现在给模型的工具列表里
+- **AI 工具调用（tool calling）**：`MailTool` 9 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 支持 OpenAI 与 Anthropic 两套协议（上限 4 轮）。**工具集按模型信任级别下发**（`agentTools(trusted:)`）：可信/本地模型拿到全部 9 个；不可信模型只有 `searchMessages` / `getMessage` / `listMailboxes` / `moveToTrash`（挂起等确认）/ `sendMessage`（永远确认 + 收件人受限 + 正文不回补）/ `proposeBatch`。`markRead` / `setFlag` / `saveDraft` 这三个写入类**根本没下发给不可信模型**，模型凭记忆发出来也会被拒
 - **「外观」设置页**（0.2.35）：主题、强调色（内置四色 + 系统调色盘，自选色深色模式自动提亮）、字体族（系统 / 圆体 / 衬线 / 等宽）、整体字号四档、列表密度、面板宽度、背景色斑强度、正文字号与行距；带实时预览与一键恢复默认
   - 342 处硬编码字号全部收口到 `Font.app()`，由 `UIState` 快照统一缩放；主题/布局只读快照，改设置经 store → `UIState` → `AppModel` 转发触发重绘
   - 设置面板改左侧竖排导航（6 个中文 Tab 用 segmented 会被系统撑到 900pt 顶出窗口）
@@ -127,8 +128,8 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 - `NativeMailStore`：已可读取真实邮件，但**无未读状态**（`.emlx` 不存已读与旗标）、「所有旗标」恒空。0.2.42 起列表与搜索走本地 `index.sqlite`（FTS5 trigram，覆盖全部邮件；索引不可用时回退现场解析）。0.2.35 修了三处「读不全」：纳入 `.emlx.partial`（Mail 未下载完的邮件）、排序改为「mtime 粗取 2× → 邮件头 Date 精排」（Mail 迁移会把 mtime 统一刷掉）、跳过 `[Gmail]` 这类容器邮箱。**仍未在真实数据上验证**——每次重签 FDA 失效，需要用户手动重新授权
 - 账号命名：优先 `Accounts.plist` → 账户目录 plist → 从邮件头推断（已发送 From / Delivered-To / To），仍有账户回退为「账户 xxxxxx」
-- API Key 仍存 `UserDefaults` 明文 plist（应迁 Keychain）；`baseURL` 未强制 HTTPS
-- tool calling 仅支持 OpenAI 兼容协议（DeepSeek / Ollama 等），Anthropic 的 tools 格式不同
+- API Key 仍存 `UserDefaults` 明文 plist（应迁 Keychain，用户已明确本期不做）；`baseURL` 未强制 HTTPS
+- tool calling 两套协议都已实现（0.2.43 补 Anthropic）
 
 未完成：
 
