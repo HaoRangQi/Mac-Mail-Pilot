@@ -175,6 +175,13 @@ struct MessageListView: View {
                                 .font(.app(9))
                                 .foregroundStyle(.orange)
                         }
+                        // 上锁必须一眼看得出来：账号级锁也走同一个判定
+                        if locked {
+                            Image(systemName: "lock.fill")
+                                .font(.app(9))
+                                .foregroundStyle(Theme.brick)
+                                .help("已上锁：不可信模型看不到这封邮件")
+                        }
                         Spacer(minLength: 4)
                         // 会话角标：同一线程的其余几封不在列表里重复出现
                         if threadCount > 1 {
