@@ -9,8 +9,8 @@ struct MessageListView: View {
             Divider().opacity(0.5)
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(model.messages) { message in
-                        row(message)
+                    ForEach(model.threadGroups) { group in
+                        row(group.latest, threadCount: group.count)
                         Divider().opacity(0.35).padding(.leading, 24)
                     }
                 }
@@ -35,7 +35,7 @@ struct MessageListView: View {
     }
 
     @ViewBuilder
-    private func row(_ message: Message) -> some View {
+    private func row(_ message: Message, threadCount: Int = 1) -> some View {
         let active = model.selected?.id == message.id
         Button {
             Task { await model.open(message) }
@@ -58,6 +58,15 @@ struct MessageListView: View {
                                 .foregroundStyle(.orange)
                         }
                         Spacer(minLength: 4)
+                        // 会话角标：同一线程的其余几封不在列表里重复出现
+                        if threadCount > 1 {
+                            Text("\(threadCount)")
+                                .font(.app(9.5, weight: .medium))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .frame(minWidth: 16, minHeight: 15)
+                                .background(Color.primary.opacity(0.07), in: Capsule())
+                        }
                         Text(Self.dateText(message.date))
                             .font(.app(10.5))
                             .foregroundStyle(.tertiary)

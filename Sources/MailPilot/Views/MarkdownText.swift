@@ -98,13 +98,37 @@ struct MarkdownText: View {
             markdown: string,
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
         ) {
-            text = Text(attributed)
+            text = Text(Self.safeLinks(in: attributed))
         } else {
             text = Text(string)
         }
         // 逐段启用选择：只在外层容器上挂 textSelection 时，
         // 鼠标拖选在某些容器（LazyVStack / ScrollView 组合）里会失效
         return text.textSelection(.enabled)
+    }
+
+    /// 模型输出里的链接也要过一遍 `LinkPolicy`。
+    ///
+    /// 邮件正文那条防线（`HTMLSanitizer`）管不到 AI 回答，而 SwiftUI 的 `Text`
+    /// 会把 markdown 链接直接渲染成可点的——一封恶意邮件只要诱导模型输出
+    /// `[点这里](file:///Applications/xxx.app)`，用户一点就启动了本地程序。
+    /// 这里把「危险特征」的链接降级成不可点文本，和邮件正文同一套判定。
+    private static func safeLinks(in attributed: AttributedString) -> AttributedString {
+        var output = attributed
+        var doomed: [Range<AttributedString.Index>] = []
+
+        for run in attributed.runs {
+            guard let url = run.link else { continue }
+            let visible = String(attributed[run.range].characters)
+            if case .suspicious = LinkPolicy.classify(href: url.absoluteString, visibleText: visible) {
+                doomed.append(run.range)
+            }
+        }
+
+        for range in doomed {
+            output[range].link = nil
+        }
+        return output
     }
 
     // MARK: - 解析

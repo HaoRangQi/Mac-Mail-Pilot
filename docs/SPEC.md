@@ -1,6 +1,6 @@
 # MailPilot Native — 规格与实现状态
 
-> 2026-10-25 16:00 更新。原生 macOS App，SwiftUI + Liquid Glass。
+> 2026-10-28 更新。原生 macOS App，SwiftUI + Liquid Glass。
 
 ## 1. 产品定义
 
@@ -21,32 +21,41 @@
 ## 3. 架构
 
 ```
-┌─────────────────────────────────────────┐
-│  MailPilot.app (单进程, SwiftUI)         │
-│                                         │
-│  RootView ── TopBar / Sidebar / List    │
-│       │            / Reader / Compose   │
-│       ▼                                 │
-│  AppModel (ObservableObject)            │
-│       │                                 │
-│       ▼                                 │
-│  MailStore 协议                          │
-│   ├─ DemoStore      演示数据（当前）      │
-│   └─ NativeStore    读 ~/Library/Mail   │
-│       │                                 │
-│  MailSender ── mailto / AppleScript     │
-│  MailMutator ── AppleScript 删除        │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  MailPilot.app (单进程, SwiftUI)                      │
+│                                                      │
+│  RootView ── TopBar / Sidebar / List                 │
+│       │            / Reader / Compose                │
+│       ▼                                              │
+│  AppModel (ObservableObject)                         │
+│       │                                              │
+│       ├─ AI 通路 ── GuardedMailStore ──┐              │
+│       │      （上锁过滤，数据层丢弃）    │              │
+│       │                                ▼              │
+│       └─ 界面通路 ──────────────► MailStore 协议       │
+│                                    ├─ DemoStore      │
+│                                    └─ NativeMailStore │
+│                                         │            │
+│                              MailIndex（SQLite+FTS5） │
+│                              缓存，可随时重建          │
+│                                                      │
+│  MailSender ── mailto / AppleScript                  │
+│  MailMutator ── AppleScript 删除 / 标已读 / 旗标       │
+└──────────────────────────────────────────────────────┘
 ```
 
 关键点：`MailStore` 是协议，视图层不关心数据来自演示还是真实文件。接真实邮件时只换实现，界面零改动。
 
-`MailMutator` 与 `MailSender` 同构：都不碰邮件存储，只通过 AppleScript 让「邮件」App 自己动手。删除的定位链经实测收敛为：
+**AI 通路多一层装饰器**（0.2.41）：`GuardedMailStore` 包住真实 store，上锁的邮件在这里被丢掉——模型不是「被告知别提」，而是根本拿不到。这层只作用于 AI，界面照常显示全部邮件（人自己要看的东西不该被藏）。过滤逻辑只写一遍，以后新增工具只要走这个 store 就自动受保护。
+
+**索引是缓存，不是真相源**（0.2.42）：`MailIndex` 存元数据与 FTS 全文索引，`path + mtime + size` 三元组决定是否需要重新解析。索引文件删掉、结构不匹配，都只是下次启动慢一点——上锁与豁免的记录存在别处（UserDefaults），丢不了。
+
+`MailMutator` 与 `MailSender` 同构：都不碰邮件存储，只通过 AppleScript 让「邮件」App 自己动手。三个写动作（删除 / 标已读 / 旗标）共用同一段定位脚本：
 
 - **账户**：`id of account`（UUID，对应 `~/Library/Mail/V10/<UUID>` 目录名）→ 显示名 → 邮箱地址 → 唯一账户
 - **邮箱**：指定邮箱（`rawName`）→ 该账户下所有非空邮箱 → **全库按 Message-ID 扫描**（跳过空邮箱）
 - **消息**：Message-ID 同时按**裸值**与**带尖括号**两种格式匹配（`whose (message id is bareId or message id is angleId)`）。Mail.app 的 `message id` 有时不带尖括号，RFC 2822 头里是 `<id@host>`，只比一种会永远匹配不到
-- **动作**：`delete` → 显式 `move` 到 `account of m` 的废纸篓
+- **动作**：`delete` → 显式 `move` 到 `account of m` 的废纸篓；`set read status` / `set flagged status` 直接改属性
 
 Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首封邮件的真实 `message id` 作为样本随错误返回，用于判断是格式差异还是邮件不在 Mail 索引里。
 
@@ -85,7 +94,7 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
   - 设置页「隐私与数据」：总开关、四个动作的处置选择、七条规则逐条开关、自定义规则增删改（带实时命中测试）、关键字编辑
   - 脱敏命中明细可见：AI 结果区显示「已脱敏 N 处：类型×n…」，展开逐条「占位符 ← 原始值」
   - 外发确认框可展开逐字检查实际发送的内容（system 与 user 都露出），并提供「脱敏后发送」——用户常是看到确认框才想起这封邮件敏感，不该逼他去改永久策略
-- **AI 工具调用（tool calling）**：`MailTool` 8 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 实现 OpenAI 协议循环（上限 4 轮）。只读工具（搜索 / 读正文 / 列邮箱）与 `moveToTrash` 已开放，后者走 `withCheckedContinuation` 挂起等用户确认，取消也会告知模型；`markRead` / `setFlag` / `saveDraft` / `sendMessage` 未开放
+- **AI 工具调用（tool calling）**：`MailTool` 8 个工具，权限三级（只读 / 写入 / 破坏性）；`AIService.chatWithTools` 实现 OpenAI 协议循环（上限 4 轮）。已开放：`searchMessages` / `getMessage` / `listMailboxes` / `moveToTrash`（挂起等确认）/ `sendMessage`（0.2.41，永远确认 + 收件人受限 + 正文不回补）。`markRead` / `setFlag` / `saveDraft` 未开放，也不再出现在给模型的工具列表里
 - **「外观」设置页**（0.2.35）：主题、强调色（内置四色 + 系统调色盘，自选色深色模式自动提亮）、字体族（系统 / 圆体 / 衬线 / 等宽）、整体字号四档、列表密度、面板宽度、背景色斑强度、正文字号与行距；带实时预览与一键恢复默认
   - 342 处硬编码字号全部收口到 `Font.app()`，由 `UIState` 快照统一缩放；主题/布局只读快照，改设置经 store → `UIState` → `AppModel` 转发触发重绘
   - 设置面板改左侧竖排导航（6 个中文 Tab 用 segmented 会被系统撑到 900pt 顶出窗口）
@@ -94,6 +103,15 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 - **阅读区增强**（0.2.35）：正文最大化（隐藏侧栏与列表，弹簧动画）、AI 结果整块折叠（内容不清空）、删除按钮移到动作行最前
 - **翻译专用模型**（0.2.36）：翻译可单独指定服务商 + 模型，未指定则跟随主模型；`requestAI` 增加 `route` 参数，信任判定 / 脱敏决策 / 实际请求都用 route 里的 model
 - **单封邮件安全开关**（0.2.36）：阅读页盾牌图标三态（模型可信 / 按策略脱敏 / 本封不脱敏），标记后该邮件在不可信模型上跳过脱敏与确认；按 Message-ID 存本地，隐私页有总览与一键清除
+- **邮件与账号上锁**（0.2.41）：`MailGuard` 两级作用域（账号级 + 邮件级，取最严），按 Message-ID 存。`GuardedMailStore` 装饰器在**数据层**丢掉锁定邮件——模型不是「被告知别提」，而是根本拿不到；锁同时是写锁，`moveToTrash` 一并拒绝。`TrustPolicy.decide` 加 `protection` 参数，单封 AI 动作直接 deny 且不能被豁免绕过。失效记录按 20 天 TTL 清理（`missingSince` 为时钟，邮件重新出现则自动复活）。`sendMessage` 工具落地：永远人工确认、收件人默认锁到原发件人、正文不回补占位符。AI 输出链接纳入 `LinkPolicy`。详见 CHANGELOG 0.2.41
+- **AskBar 脱敏 + 审计日志**（0.2.42）：`AIAction.ask` 纳入 `TrustPolicy`；`RedactionContext` 是会话级的，system / 问题 / 每次工具返回共用一套占位符编号，回答返回后还原并在气泡下显示命中统计。`AuditLog` 追加写 JSONL（5MB × 3 轮转），只记元数据不记正文，隐私页可查看大小 / 定位 / 清空
+- **本地索引 `index.sqlite`**（0.2.42）：缓存库，`path + mtime + size` 判定是否需要重新解析；搜索改用 FTS5 trigram，覆盖全部邮件而非「每箱最近 400 封」，短于 3 字符退回 LIKE。索引打不开或结构不匹配就整份重建并退回现场解析。附件元数据（`partIndex` + 估算大小）、线程根（`References` 第一个）一并入库
+- **附件保存**（0.2.42）：解析只收元数据不读字节，保存时按 `partIndex` 回原文件取；`NSSavePanel` 选路径、文件名剥路径分隔符与 `..`、保存后不自动打开
+- **写工具补齐**（0.2.42）：`MailMutator` 定位链抽成共用块，删除 / 标已读 / 旗标共用；`saveDraft` 接线。**写入类工具只给可信模型**
+- **会话视图**（0.2.43）：列表按线程聚合（最新一封 + 「N 封」角标），阅读页顶部有会话栏可切换；搜索时不聚合
+- **Anthropic 工具调用**（0.2.43）：`chatWithTools` 分出 Anthropic 分支（顶层 `system` + `tool_use` / `tool_result` 内容块），工具定义自动转换，脱敏钩子两条路径一致
+- **AI 批量处理**（0.2.43）：`proposeBatch` 工具 + 勾选清单 sheet。锁定邮件在解析阶段被丢弃、不会进清单；不可信模型只能批量删除；单次上限 50 封
+- **仓库内断言测试**（0.2.43）：`make test` 跑 63 条断言，全部用合成 `.emlx`，不依赖 XCTest 与磁盘权限
 - **侧边栏按服务商归类**（0.2.37）：三层结构「服务商 → 账号 → 邮箱」，`MailService.detect(email:)` 按邮箱域名识别 Gmail / Outlook / iCloud / Yahoo / QQ / 网易 / 其他；服务商与账号都可折叠，折叠键分别为 `svc:<名>` 与账号 id
 - **写邮件页 AI**（0.2.37）：主题行下方 AI 条，按意图起草正文；正文非空时切换为「AI 修稿」按意图改写全文。主题作为显式约束写进提示词防跑偏，不填主题则约束不出现。外发内容只有用户意图 + 主题（修稿时含当前正文），不可信模型仍脱敏但**不弹确认**——用户点「AI 起草」本身即明确外发意图，且邮件正文不在外发内容里
 - **AI 问答浮层 AskBar**（0.2.37）：Markdown 渲染（`MarkdownText`，按行切块 + `AttributedString` 行内样式）、每条回答复制 / 重跑、最新提问可编辑后重跑、全屏展开、清空与删除标红。`MarkdownText` 的 `inline()` 返回 `some View`（`Text.textSelection` 不返回 Text）
@@ -107,21 +125,24 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 部分完成 / 有已知缺陷：
 
-- `NativeMailStore`：已可读取真实邮件，但**无未读状态**（`.emlx` 不存已读与旗标）、「所有旗标」恒空、搜索为扫描式（收件箱与归档各最近 400 封）。0.2.35 修了三处「读不全」：纳入 `.emlx.partial`（Mail 未下载完的邮件）、排序改为「mtime 粗取 2× → 邮件头 Date 精排」（Mail 迁移会把 mtime 统一刷掉）、跳过 `[Gmail]` 这类容器邮箱。**仍未在真实数据上验证**——每次重签 FDA 失效，需要用户手动重新授权
+- `NativeMailStore`：已可读取真实邮件，但**无未读状态**（`.emlx` 不存已读与旗标）、「所有旗标」恒空。0.2.42 起列表与搜索走本地 `index.sqlite`（FTS5 trigram，覆盖全部邮件；索引不可用时回退现场解析）。0.2.35 修了三处「读不全」：纳入 `.emlx.partial`（Mail 未下载完的邮件）、排序改为「mtime 粗取 2× → 邮件头 Date 精排」（Mail 迁移会把 mtime 统一刷掉）、跳过 `[Gmail]` 这类容器邮箱。**仍未在真实数据上验证**——每次重签 FDA 失效，需要用户手动重新授权
 - 账号命名：优先 `Accounts.plist` → 账户目录 plist → 从邮件头推断（已发送 From / Delivered-To / To），仍有账户回退为「账户 xxxxxx」
 - API Key 仍存 `UserDefaults` 明文 plist（应迁 Keychain）；`baseURL` 未强制 HTTPS
 - tool calling 仅支持 OpenAI 兼容协议（DeepSeek / Ollama 等），Anthropic 的 tools 格式不同
 
 未完成：
 
-- **AI 批量处理交互**：`moveToTrash` 已可被 AI 调用（带确认），但「按提示找邮件 → 确认批量处理」的完整体验还没做
-- 附件保存、规则、归档、会话视图
+- ~~**AI 批量处理交互**~~（0.2.43 已实现 `proposeBatch` + 勾选清单）
+- ~~**会话视图 UI**~~（0.2.43 已实现列表聚合与阅读页会话栏）
+- **未读状态 / 旗标读取**：`.emlx` 不存旗标，需要读 Mail 的 `Envelope Index`（私有 SQLite）。写侧已通（`markRead` / `setFlag` 走 AppleScript），读侧缺数据源
+- **规则与归档**：完全没有
+- ~~**附件保存**~~（0.2.42 已实现，见「已完成」节）
 - ~~**邮件正文渲染**~~（0.2.38 已实现，含 0.2.39 远程图片放行，见「已完成」节）
 - **本地模型预检（方案B，已评估未实现）**：用本地小模型给邮件打「敏感度 1-10」，高分时把处置从 redact 升级为 confirm/deny。路线首选 macOS 26 的 Foundation Models（`LanguageModelSession`），次选 MLX Swift；llama.cpp 因 0.5B CPU 推理 10-20 token/s、1000 token 邮件要 1 分钟+，不适合交互场景。**小模型只打分、不改写正文**
-- **补开工具**：`markRead` / `setFlag`（需扩展 `MailStore` 协议，可能要借道 AppleScript）、`saveDraft` / `sendMessage`
-- **MCP Server**：把同一套 `MailTool` 用 MCP 协议导出，让外部客户端（Claude Desktop 等）连接。tool calling 是共用地基，此项是薄适配层
-- **账户级隐私策略**：按账户（工作 / 个人 / 金融）限制能否使用第三方模型
-- **审计日志**：记录外发的元数据（时间、模型、字符数、邮件 ID，不含正文），可查看 / 导出 / 清除
+- ~~**补开工具**~~（0.2.42 已开放 `markRead` / `setFlag` / `saveDraft`，写入类只给可信模型）
+- **MCP Server**：把同一套 `MailTool` 用 MCP 协议导出，让外部客户端（Claude Desktop 等）连接。真正的障碍是 GUI App 不能对外提供 stdio，需要拆包成 `MailPilotCore` + `mailpilot-mcp` CLI
+- ~~**审计日志**~~（0.2.42 已实现，JSONL + 5MB × 3 轮转，隐私页可查看 / 清空）
+- **账户级隐私策略**：账号级上锁已覆盖「这个账号的邮件能不能给不可信模型看」；仍缺的是「本地模型 / 可信第三方」分档（例如某些邮件只允许本地模型）
 
 - （可选）固定签名证书免除每次编译后重授权（FDA 与自动化都受益）。用户目前接受手动重新授权，暂缓；若重启此项，注意上次失败的根因是 openssl 3 默认用 AES-256-CBC + SHA256 导出 PKCS12，macOS `security import` 不认——加 `-legacy`（或 `-macalg sha1 -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES`）可解决；证书还需带 `extendedKeyUsage=codeSigning` 才会被 `codesign` 识别
 
@@ -135,21 +156,32 @@ Message-ID 由 `EmlxParser` 从头解析获得。找不到时会把该账户首�
 
 ## 6. 安全边界
 
-- 删除：AI **可以调用** `moveToTrash`，但必须人点确认才会执行（continuation 挂起等用户）；取消时会把「用户取消了这次操作」回传给模型，不让它自己编结果
-- 发送：默认只打开撰写窗口，用户手动点发送；"直接发送"是显式开关
-- 工具权限三级：只读任何模型可用；写入与破坏性一律确认
+- 删除：AI **可以调用** `moveToTrash`，但必须人点确认才会执行（continuation 挂起等用户）；取消时会把「用户取消了这次操作」回传给模型，不让它自己编结果。批量走 `proposeBatch` 的勾选清单（0.2.43），不逐封弹框——连点 N 次确认框会让人无脑点
+- 发送：撰写页默认只打开「邮件」撰写窗口，用户手动点发送（"直接发送"是显式开关）；**AI 调用 `sendMessage` 则永远弹确认**，且确认框里能改收件人、能看见完整正文
+- 工具权限三级：只读任何模型可用；写入与破坏性一律确认。**写入类（`markRead` / `setFlag` / `saveDraft`）只给可信模型**，不可信模型的工具集只有 读 + 删（进废纸篓）+ 发（永远确认）+ 批量删
 - 提示词层面禁止模型在收到「已执行」之前声称已删除 / 已发送
 - 无自动归档、无自动清理。所有写操作都要用户点头。
-- **第三方模型风险管理**：供应商默认不可信；不可信模型上**四个动作默认都含脱敏**——只读类（摘要 / 分类）脱敏后直接发，会产生对外内容的（草拟回复 / 翻译）脱敏后再确认。脱敏规则与处置都可在「隐私与数据」页调整，命中明细对用户可见
-- **已知缺口**：AskBar 的 `askWithTools` 尚未纳入管控——问题原文与工具读回的邮件正文原样外发，无脱敏无确认。修它需要给 `chatWithTools` 加内容变换钩子 + 会话级共享映射表
+- **第三方模型风险管理**：供应商默认不可信；不可信模型上**五个动作默认都含脱敏**——只读类（摘要 / 分类 / 问答）脱敏后直接发，会产生对外内容的（草拟回复 / 翻译）脱敏后再确认。脱敏规则与处置都可在「隐私与数据」页调整，命中明细对用户可见
+- **已知缺口**：AskBar 的管控已在 0.2.42 补齐（脱敏走会话级 `RedactionContext`）。仍未接入的是**未读状态**——`.emlx` 不存旗标，需要读 Mail 的 `Envelope Index` 私有 SQLite，无法在无 FDA 环境验证，暂不盲写
 - **单封邮件豁免**：用户可把某封邮件标记为「不敏感」，该邮件在不可信模型上原样发送（不脱敏、不确认）。豁免**只降级 redact / confirm，不推翻 deny**——「禁止该动作用于不可信模型」是对动作本身的硬性规定。三处可见性兜底：动作行图标常驻三态、AI 结果区提示「本次未脱敏」、隐私页可查看总数并一键清除
+- **上锁**（0.2.41）：与豁免方向相反，是**访问控制**而不是脱敏策略。上锁的账号 / 邮件在非可信模型上根本拿不到（`GuardedMailStore` 在数据层丢弃），阅读页 AI 动作直接 deny。两级取最严、账号锁不可被单封解锁、豁免与锁冲突时锁优先
+- **发送永远人工确认**：可信模型也一样。风险不在投递而在内容——模型能把读到的邮件发出去，这是唯一的外泄通道。非可信模型下收件人默认锁到原发件人，正文不回补脱敏占位符
+- **提示词注入的边界**：模型没有代码执行能力，攻击面等于工具集的并集（读 / 删 / 发）。防线按有效性排序：能力最小化 > 数据流标记（`<mail>` 分隔）> 人工确认 > 提示词约束。任何新增「写文件 / 打开任意 URL / 执行命令」的能力都必须先设红线
+- **上锁不是加密**：邮件在 `~/Library/Mail` 里仍是明文，锁只作用于 MailPilot 的 AI 通路
 
 ## 7. 构建与运行
 
 ```bash
 make run      # 编译 + 组装 .app + 启动
 make verify   # 只编译，快速检查错误
+make test     # 断言测试（合成 .emlx，不需要磁盘权限）
 make clean    # 删除构建产物
 ```
 
 依赖：macOS 26+（Liquid Glass），Command Line Tools。
+
+`make test` 跑 `scripts/test.sh`，三套共 63 条断言：上锁与访问控制（28）、索引与 FTS（18）、附件与线程（17）。全部用合成 `.emlx`，不依赖 XCTest 也不依赖完全磁盘访问权限，任何机器上都能跑。
+
+没用 SwiftPM testTarget 的原因：可执行 target 不能被测试 target import，要先拆成 library。拆包会波及所有类型可见性，收益不抵风险，所以先用 `swiftc` 直接编译被测文件。
+
+**版本号**写在 `Resources/Info.plist` 的 `CFBundleShortVersionString`，与 CHANGELOG 最新条目保持一致。

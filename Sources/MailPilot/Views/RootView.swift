@@ -58,6 +58,22 @@ struct RootView: View {
                 .environmentObject(model.prefs)
                 .environmentObject(model)
         }
+        // 发送确认挂在根视图而不是 AskBar：浮窗可以被 Esc 关掉，
+        // 但「要不要把这封邮件发出去」的决定不能跟着一起消失
+        .sheet(isPresented: Binding(
+            get: { model.pendingSendInfo != nil },
+            set: { presented in if !presented { model.resolveSendConfirmation(false) } }
+        )) {
+            SendConfirmSheet()
+                .environmentObject(model)
+        }
+        .sheet(isPresented: Binding(
+            get: { model.pendingBatch != nil },
+            set: { presented in if !presented { model.resolveBatch(false) } }
+        )) {
+            BatchConfirmSheet()
+                .environmentObject(model)
+        }
         .alert("操作失败", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: { presented in if !presented { model.errorMessage = nil } }

@@ -124,6 +124,9 @@ enum PrivacyDefaults {
         switch action {
         case .summarize, .classify: return .redact
         case .reply, .translate: return .redactConfirm
+        // 问答只产出留在本机的回答，不生成对外内容，所以脱敏后直接发；
+        // 它的写操作（删除 / 发送）另有独立的确认流程
+        case .ask: return .redact
         }
     }
 }

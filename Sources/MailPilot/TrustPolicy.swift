@@ -41,10 +41,17 @@ enum TrustPolicy {
     /// - Parameter exempted: 这封邮件是否被用户标记为「不敏感」。
     ///   标记后直接放行，跳过脱敏与确认——但**不推翻 deny**：
     ///   「禁止该动作用于不可信模型」是用户对动作本身的规定，不该被单封邮件覆盖。
+    /// - Parameter protection: 这封邮件是否被上锁。上锁是**访问控制**，
+    ///   优先级高于脱敏策略：非可信模型连读都不许读，谈不上「脱敏后再发」。
+    ///   同样不推翻……反过来，它自己就是一种 deny，豁免不能绕过它。
     static func decide(action: AIAction,
                        trusted: Bool,
                        prefs: AIPreferences,
-                       exempted: Bool = false) -> Decision {
+                       exempted: Bool = false,
+                       protection: MailProtection = .open) -> Decision {
+        if protection == .locked, !trusted {
+            return .deny("这封邮件已上锁，不可信模型无法访问。可在阅读页解锁，或换成本地 / 可信模型")
+        }
         let base = baseDecision(action: action, trusted: trusted, prefs: prefs)
         guard exempted, base.isAllowed else { return base }
         // 豁免只把 redact / confirm 降级为 allow，deny 保持原样
@@ -78,15 +85,24 @@ enum TrustPolicy {
                        provider: AIProvider,
                        model: String,
                        prefs: AIPreferences,
-                       exempted: Bool = false) -> Decision {
-        decide(action: action, trusted: provider.isTrusted(model), prefs: prefs, exempted: exempted)
+                       exempted: Bool = false,
+                       protection: MailProtection = .open) -> Decision {
+        decide(action: action,
+               trusted: provider.isTrusted(model),
+               prefs: prefs,
+               exempted: exempted,
+               protection: protection)
     }
 
     /// 供 UI 展示的一句话说明
     static func explain(action: AIAction,
                         trusted: Bool,
                         prefs: AIPreferences,
-                        exempted: Bool = false) -> String {
+                        exempted: Bool = false,
+                        protection: MailProtection = .open) -> String {
+        if protection == .locked, !trusted {
+            return "这封邮件已上锁，不可信模型看不到它。换成本地 / 可信模型即可使用"
+        }
         if exempted, !trusted {
             return "这封邮件已标记为不敏感，内容原样发送，不脱敏也不确认"
         }

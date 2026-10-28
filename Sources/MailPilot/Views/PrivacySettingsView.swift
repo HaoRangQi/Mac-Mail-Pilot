@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// 隐私与数据设置页。
@@ -20,11 +21,13 @@ struct PrivacySettingsView: View {
             VStack(alignment: .leading, spacing: 20) {
                 overview
                 globalSwitch
+                guardSection
                 exemptionSection
                 policySection
                 redactionSection
                 customRulesSection
                 keywordsSection
+                auditSection
             }
             .padding(22)
         }
@@ -87,6 +90,90 @@ struct PrivacySettingsView: View {
             Text("开启后任何内容发往第三方前都会弹确认框。它只追加确认，不会取消下面各动作已设的脱敏——该脱敏的仍然先脱敏。")
                 .font(.app(11))
                 .foregroundStyle(.tertiary)
+        }
+    }
+
+    // MARK: - 受保护范围
+
+    private var lockedAccounts: [Account] {
+        model.accounts.filter { model.guards.isAccountLocked($0.id) }
+    }
+
+    /// 上锁不是脱敏，是「根本不让模型看到」。
+    /// 所以这一节必须明确讲清楚它和下面「单封豁免」的方向正好相反。
+    private var guardSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("受保护范围")
+                    .font(.app(12, weight: .medium))
+                Spacer()
+                Button {
+                    model.clearAllGuards()
+                } label: {
+                    Text("全部清除")
+                        .font(.app(11.5))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(model.guards.lockedAccountCount == 0 && model.guards.lockedMessageCount == 0)
+            }
+
+            Text("上锁的账号或邮件，不可信模型完全看不到——不是脱敏，是根本不进入上下文。账号级与邮件级取最严：账号上锁后，单封不能再解锁。")
+                .font(.app(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(alignment: .leading, spacing: 5) {
+                statRow("锁定账号", "\(model.guards.lockedAccountCount) 个")
+                statRow("锁定邮件", "\(model.guards.lockedMessageCount) 封")
+                if model.guards.orphanedCount > 0 {
+                    statRow("已失效", "\(model.guards.orphanedCount) 条 · 源邮件已不在磁盘上，满 20 天自动清理")
+                }
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+
+            if !lockedAccounts.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(lockedAccounts) { account in
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.fill")
+                                .font(.app(8))
+                                .foregroundStyle(Theme.brick)
+                            Text(account.name)
+                                .font(.app(11.5))
+                            Text(account.email)
+                                .font(.app(10.5))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                            Spacer(minLength: 6)
+                            Button("解锁") {
+                                model.unlockAccount(id: account.id)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.app(11))
+                            .foregroundStyle(.secondary)
+                        }
+                        .frame(height: 22)
+                    }
+                }
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+            }
+        }
+    }
+
+    private func statRow(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .font(.app(11.5))
+                .foregroundStyle(.secondary)
+                .frame(width: 62, alignment: .leading)
+            Text(value)
+                .font(.app(11.5))
+            Spacer(minLength: 0)
         }
     }
 
@@ -346,6 +433,59 @@ struct PrivacySettingsView: View {
         }
     }
 
+    // MARK: - 外发记录
+
+    /// 每次外发与写操作都会留一条元数据。这里只做「看得见、能清掉」，
+    /// 不做复杂查询——真要分析直接看 JSONL 文件。
+    private var auditSection: some View {
+        // 让清空后能重算大小
+        let _ = form.auditVersion
+        let bytes = AuditLog.totalBytes
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("外发记录")
+                .font(.app(12, weight: .medium))
+
+            Text("每次把邮件内容发给模型、每次删除或发送，都会记一条元数据：时间、动作、服务商、模型、字符数、脱敏数量。**不记录正文**。")
+                .font(.app(11))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Text(bytes == 0 ? "还没有记录" : "已占用 \(byteText(bytes))")
+                    .font(.app(12))
+                    .foregroundStyle(bytes == 0 ? .secondary : .primary)
+
+                Spacer()
+
+                Button("在访达中显示") {
+                    if let url = AuditLog.fileURL,
+                       FileManager.default.fileExists(atPath: url.path) {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(bytes == 0)
+
+                Button("清空") {
+                    AuditLog.clear()
+                    form.auditVersion += 1
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(bytes == 0)
+            }
+            .padding(11)
+            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 9))
+        }
+    }
+
+    private func byteText(_ bytes: Int) -> String {
+        if bytes > 1_048_576 { return String(format: "%.1f MB", Double(bytes) / 1_048_576) }
+        return "\(max(1, bytes / 1024)) KB"
+    }
+
     /// 一行一个关键字的编辑绑定
     private var keywordsBinding: Binding<String> {
         Binding(
@@ -384,11 +524,13 @@ struct PrivacySettingsView: View {
 
 private extension AIAction {
     /// 设置页里要展示的动作
-    static let allCasesForSettings: [AIAction] = [.summarize, .reply, .classify, .translate]
+    static let allCasesForSettings: [AIAction] = [.summarize, .reply, .classify, .translate, .ask]
 }
 
 /// 隐私设置页的表单状态（@State 在 CLT 下编不过，沿用 ObservableObject）
 final class PrivacyForm: ObservableObject {
     @Published var addingRule = false
     @Published var editingRule: CustomRedactionRule?
+    /// 审计日志清空后 +1，用来触发大小重算
+    @Published var auditVersion = 0
 }

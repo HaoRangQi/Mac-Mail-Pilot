@@ -34,30 +34,39 @@ open build/MailPilot.app
 | `make run` | 构建并启动 |
 | `make build` | 只构建打包 |
 | `make verify` | 只编译，快速检查编译错误 |
+| `make test` | 断言测试（合成邮件，不需要磁盘权限） |
 | `make clean` | 删除 `.build/` 与 `build/` |
 
 ## 目录结构
 
 ```
 MailPilotNative/
-├── Makefile               # make run / build / verify / clean
+├── Makefile               # run / build / verify / test / clean
 ├── Package.swift          # SwiftPM 配置（executableTarget）
 ├── Resources/
 │   └── Info.plist         # Bundle 信息（含本地化声明）
 ├── Sources/MailPilot/
 │   ├── App.swift          # @main + 菜单命令
-│   ├── AppModel.swift     # @MainActor 状态中心、AI 调用编排、AI 历史
+│   ├── AppModel.swift     # @MainActor 状态中心、AI 调用编排、工具调用
 │   ├── Models.swift       # Message / Mailbox / Account / MailStore / DemoStore
 │   ├── MailAccess.swift   # 完全磁盘访问权限检测与跳转
 │   ├── NativeMailStore.swift  # 直读 ~/Library/Mail 的 .emlx
-│   ├── EmlxParser.swift   # 轻量 MIME 解析（RFC2047 / base64 / QP / multipart）
-│   ├── AISettings.swift   # 服务商与多密钥管理、AI 调用
+│   ├── EmlxParser.swift   # 轻量 MIME 解析（RFC2047 / base64 / QP / multipart / 附件）
+│   ├── MailIndex.swift    # 本地索引（SQLite + FTS5），列表与搜索的数据源
+│   ├── AISettings.swift   # 服务商与多密钥管理、AI 调用（含 Anthropic 工具调用）
 │   ├── AIPreferences.swift # 个性化 / 语气 / 样本 / 翻译偏好
+│   ├── TrustPolicy.swift  # 动作 × 信任 × 上锁 → 唯一决策来源
+│   ├── Redactor.swift     # 脱敏与会话级占位符映射
+│   ├── MailGuard.swift    # 邮件 / 账号上锁 + 20 天 TTL 清理
+│   ├── GuardedMailStore.swift # AI 通路的访问控制装饰器
+│   ├── AuditLog.swift     # 外发与写操作审计（JSONL）
+│   ├── MailMutator.swift  # 通过「邮件」App 删除 / 标已读 / 旗标
 │   ├── MailSender.swift   # 通过「邮件」App 发信
 │   └── Views/             # SwiftUI 界面
+├── Tests/                 # 断言测试（合成 .emlx，不依赖 XCTest）
 ├── docs/
 │   └── SPEC.md            # 需求与实现现状
-├── scripts/               # build / run / clean
+├── scripts/               # build / run / clean / test
 └── build/                 # 打包产物（已 gitignore）
 ```
 
@@ -75,15 +84,16 @@ MailPilotNative/
 ```
 
 - `MailStore` 是数据源协议，`AppModel` 只依赖协议，因此演示/真实可随时切换
-- `NativeMailStore` 不做全量索引：列表按 mtime 取最近 N 封只解析头部，正文按需解析
-- AI 层与服务商配置解耦，支持多密钥轮换（401/403/429 自动换下一条）
+- `NativeMailStore` 不做全量索引：列表与搜索走本地 `index.sqlite`（只 stat 变化过的文件才重新解析），正文按需解析
+- AI 层与服务商配置解耦，支持多密钥轮换（401/403/429 自动换下一条）；OpenAI 兼容协议与 Anthropic 都支持工具调用
+- 安全层：上锁（`MailGuard`）→ 脱敏（`Redactor`）→ 确认（`TrustPolicy`）→ 审计（`AuditLog`），决策只在一个地方
 
 ## 已知限制
 
-- 未读状态不可用（`.emlx` 不存旗标与已读标记）
+- 未读状态不可用（`.emlx` 不存旗标与已读标记，需要读「邮件」App 的私有 Envelope Index）
 - 「所有旗标」恒为空
-- 搜索为扫描式（收件箱与归档各最近 400 封），非全文索引
-- 删除走「邮件」App，本地不直接删文件
+- 搜索走本地 FTS5 索引（trigram），覆盖全部邮件；索引首次建立后才会生效，之前的查询退回现场解析
+- 删除、标已读、旗标都走「邮件」App，本地不直接改文件
 - **每次重新编译都会改变 ad-hoc 签名，「完全磁盘访问权限」需要重新授权**
   （长期方案是固定签名证书）
 
@@ -98,7 +108,10 @@ git push -u origin main
 
 ```bash
 make verify    # 确认编译通过
+make test      # 确认核心逻辑没被改坏
 ```
+
+版本号写在 `Resources/Info.plist` 的 `CFBundleShortVersionString`，与 CHANGELOG 的最新条目保持一致。改动功能后两处一起更新。
 
 ## License
 

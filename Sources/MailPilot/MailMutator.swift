@@ -18,32 +18,120 @@ enum MailMutatorError: LocalizedError {
     }
 }
 
-/// 破坏性操作：把邮件移入「邮件」App 的废纸篓。
+/// 写操作：移入废纸篓、标记已读、加/取消旗标。
 ///
 /// 实现思路与 Apple Mail MCP 服务器（jayvee6/apple-mail-mcp）一致：
-/// 用 AppleScript 让「邮件」App 自己执行删除——先按 账户名 → 邮箱名 → RFC 2822 Message-ID
-/// 定位消息，再 `delete`。消息会进入账户的废纸篓，「邮件」App 的索引同步更新，
-/// 本地 `.emlx` 也会随之移出原邮箱目录——所以刷新后不会再回来，是真实删除。
+/// 用 AppleScript 让「邮件」App 自己动手——先按 账户 → 邮箱 → RFC 2822 Message-ID
+/// 定位消息，再执行动作。「邮件」App 的索引同步更新，本地 `.emlx` 也会跟着变，
+/// 刷新后状态是对的。
 ///
-/// 之所以不自己动 `.emlx` 文件：「邮件」App 的存储有私有 Envelope Index，
-/// 外部搬文件它不会知道，界面也不会更新。
+/// 之所以不自己动 `.emlx` 或 Envelope Index：那是「邮件」App 的私有存储，
+/// 外部改了它不知道，界面也不会更新。
 enum MailMutator {
 
-    /// 账户定位四级回退：账户 id（UUID）→ 名称 → 邮箱地址 → 唯一账户
-    /// 消息定位两级回退：指定邮箱 → 账户下所有邮箱；最后全库按 Message-ID 兜底
-    /// 删除动作两级回退：`delete`（原生，自动进废纸篓）→ 显式 move 到废纸篓邮箱
+    // MARK: - 动作
+
     static func moveToTrash(accountID: String,
                             accountName: String,
                             accountEmail: String,
                             mailboxName: String,
                             messageID: String) async throws {
+        let script = """
+        tell application "Mail"
+        \(location(accountID: accountID,
+                   accountName: accountName,
+                   accountEmail: accountEmail,
+                   mailboxName: mailboxName,
+                   messageID: messageID))
+
+            try
+                delete m
+                return "OK"
+            on error delErr
+                try
+                    set mAcct to account of m
+                    set trashBox to missing value
+                    repeat with j from 1 to (count of mailboxes of mAcct)
+                        set mb to mailbox j of mAcct
+                        set mbName to name of mb as string
+                        if mbName is "Trash" or mbName is "Deleted Messages" or mbName is "Bin" or mbName is "Deleted Items" then
+                            set trashBox to mb
+                            exit repeat
+                        end if
+                        if mbName is "已删除邮件" or mbName is "已删除" or mbName is "废纸篓" then
+                            set trashBox to mb
+                            exit repeat
+                        end if
+                    end repeat
+                    if trashBox is missing value then return "ERROR: " & (delErr as string)
+                    move m to trashBox
+                    return "OK"
+                on error
+                    return "ERROR: " & (delErr as string)
+                end try
+            end try
+        end tell
+        """
+        try await run(script)
+    }
+
+    static func setRead(_ read: Bool,
+                        accountID: String,
+                        accountName: String,
+                        accountEmail: String,
+                        mailboxName: String,
+                        messageID: String) async throws {
+        let script = """
+        tell application "Mail"
+        \(location(accountID: accountID,
+                   accountName: accountName,
+                   accountEmail: accountEmail,
+                   mailboxName: mailboxName,
+                   messageID: messageID))
+
+            set read status of m to \(read ? "true" : "false")
+            return "OK"
+        end tell
+        """
+        try await run(script)
+    }
+
+    static func setFlagged(_ flagged: Bool,
+                           accountID: String,
+                           accountName: String,
+                           accountEmail: String,
+                           mailboxName: String,
+                           messageID: String) async throws {
+        let script = """
+        tell application "Mail"
+        \(location(accountID: accountID,
+                   accountName: accountName,
+                   accountEmail: accountEmail,
+                   mailboxName: mailboxName,
+                   messageID: messageID))
+
+            set flagged status of m to \(flagged ? "true" : "false")
+            return "OK"
+        end tell
+        """
+        try await run(script)
+    }
+
+    // MARK: - 定位（三个动作共用）
+
+    /// 定位链：账户 id（UUID）→ 名称 → 邮箱地址 → 唯一账户；
+    /// 消息定位：指定邮箱 → 账户下所有邮箱 → 全库按 Message-ID 兜底。
+    /// 动作放在后面，定位这块任何改动三个动作一起生效。
+    private static func location(accountID: String,
+                                 accountName: String,
+                                 accountEmail: String,
+                                 mailboxName: String,
+                                 messageID: String) -> String {
         // 「邮件」App 的 `message id` 属性通常不带尖括号，而 RFC 2822 头里是 <id@host>。
         // 两边都试一遍，避免格式差异导致永远匹配不到。
         let bare = messageID.trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
-        guard !bare.isEmpty else { throw MailMutatorError.missingMessageID }
 
-        let script = """
-        tell application "Mail"
+        return """
             set bareId to "\(escape(bare))"
             set angleId to "<" & bareId & ">"
             set acctIdx to 0
@@ -143,37 +231,13 @@ enum MailMutator {
                 end if
                 return "ERROR: 找不到 Message-ID " & bareId & "（账户定位" & acctFound & "；样本 " & sampleId & "）"
             end if
-
-            try
-                delete m
-                return "OK"
-            on error delErr
-                try
-                    set mAcct to account of m
-                    set trashBox to missing value
-                    repeat with j from 1 to (count of mailboxes of mAcct)
-                        set mb to mailbox j of mAcct
-                        set mbName to name of mb as string
-                        if mbName is "Trash" or mbName is "Deleted Messages" or mbName is "Bin" or mbName is "Deleted Items" then
-                            set trashBox to mb
-                            exit repeat
-                        end if
-                        if mbName is "已删除邮件" or mbName is "已删除" or mbName is "废纸篓" then
-                            set trashBox to mb
-                            exit repeat
-                        end if
-                    end repeat
-                    if trashBox is missing value then return "ERROR: " & (delErr as string)
-                    move m to trashBox
-                    return "OK"
-                on error
-                    return "ERROR: " & (delErr as string)
-                end try
-            end try
-        end tell
         """
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
+    // MARK: - 执行
+
+    private static func run(_ script: String) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 var errorInfo: NSDictionary?
                 guard let appleScript = NSAppleScript(source: script) else {
@@ -198,7 +262,7 @@ enum MailMutator {
                 } else {
                     let reason = output.hasPrefix("ERROR: ")
                         ? String(output.dropFirst("ERROR: ".count))
-                        : (output.isEmpty ? "删除失败，未知原因" : output)
+                        : (output.isEmpty ? "操作失败，未知原因" : output)
                     continuation.resume(throwing: MailMutatorError.notFound(reason))
                 }
             }

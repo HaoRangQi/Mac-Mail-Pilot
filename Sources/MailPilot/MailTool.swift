@@ -13,6 +13,9 @@ enum MailTool: String, CaseIterable, Identifiable {
     case moveToTrash
     case saveDraft
     case sendMessage
+    /// 一次提出多封邮件的处理方案，由用户勾选后统一执行。
+    /// 逐封调用 moveToTrash 会让用户连点 N 次确认框，点到后面就是无脑点
+    case proposeBatch
 
     var id: String { rawValue }
 
@@ -20,7 +23,7 @@ enum MailTool: String, CaseIterable, Identifiable {
         switch self {
         case .searchMessages, .getMessage, .listMailboxes: return .read
         case .markRead, .setFlag, .saveDraft: return .write
-        case .moveToTrash, .sendMessage: return .destructive
+        case .moveToTrash, .sendMessage, .proposeBatch: return .destructive
         }
     }
 
@@ -43,6 +46,8 @@ enum MailTool: String, CaseIterable, Identifiable {
             return "把一封邮件存为草稿，需要收件人、主题、正文"
         case .sendMessage:
             return "发送一封邮件，需要收件人、主题、正文。发送后无法撤回，必须用户确认"
+        case .proposeBatch:
+            return "一次提出对多封邮件的处理方案（删除到废纸篓 / 标已读 / 加旗标）。需要处理 2 封以上时用这个，不要逐封调用"
         }
     }
 
@@ -89,6 +94,20 @@ enum MailTool: String, CaseIterable, Identifiable {
                 "subject": str("邮件主题"),
                 "body": str("邮件正文"),
             ], ["to", "subject", "body"])
+        case .proposeBatch:
+            return obj([
+                "action": [
+                    "type": "string",
+                    "enum": ["trash", "markRead", "setFlag"],
+                    "description": "trash=移入废纸篓，markRead=标为已读，setFlag=加旗标",
+                ],
+                "message_ids": [
+                    "type": "array",
+                    "items": ["type": "string"],
+                    "description": "邮件 ID 列表，来自搜索结果。最多 50 封",
+                ],
+                "reason": str("一句话说明为什么选这些邮件，会显示在确认清单顶部"),
+            ], ["action", "message_ids", "reason"])
         }
     }
 
@@ -139,6 +158,9 @@ struct ToolCall: Identifiable {
             return "存草稿：\(arguments["subject"] as? String ?? "")"
         case .sendMessage:
             return "发送邮件给 \(arguments["to"] as? String ?? "")：\(arguments["subject"] as? String ?? "")"
+        case .proposeBatch:
+            let count = (arguments["message_ids"] as? [Any])?.count ?? 0
+            return "批量处理 \(count) 封：\(arguments["reason"] as? String ?? "")"
         }
     }
 }

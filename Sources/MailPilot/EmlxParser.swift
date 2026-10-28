@@ -17,28 +17,30 @@ enum EmlxParser {
         /// Content-ID → 内联图片数据。WKWebView 不解析 cid: 协议，渲染前要转 data URI
         var inlineImages: [String: Data] = [:]
         var hasAttachments = false
+        /// 附件元数据（不含字节）
+        var attachments: [Attachment] = []
+        /// 回复链（References 头，从旧到新）。Android/iOS 之外的老客户端也有，
+        /// 缺失时退回 In-Reply-To
+        var references: [String] = []
+        var inReplyTo = ""
         var messageID = ""
         var deliveredTo = ""
+
+        /// 线程根：`References` 的第一个（最旧）→ `In-Reply-To` → 自己的 Message-ID。
+        /// References 是按时间从旧到新排的，取第一个才是整条链的根。
+        /// 兜底要剥尖括号，否则同一线程里根消息和其他消息的键格式不一致，聚不到一起
+        var threadRoot: String {
+            if let first = references.first { return first }
+            if !inReplyTo.isEmpty { return inReplyTo }
+            return messageID.trimmingCharacters(in: CharacterSet(charactersIn: "<> \t\r\n"))
+        }
     }
 
     static func parse(url: URL, includeBody: Bool) -> Parsed? {
         // HTML 正文 + 内联图片可能撑得很大，读上限放到 2MB；
         // 只取列表预览时仍只读 24KB
         let limit = includeBody ? 2_000_000 : 24_000
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let data = try? handle.read(upToCount: limit), !data.isEmpty else { return nil }
-
-        var bytes = [UInt8](data)
-        // .emlx 首行是 RFC822 的字节数
-        if let newline = bytes.firstIndex(of: 0x0A) {
-            let head = bytes[0..<newline]
-            if !head.isEmpty, head.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) {
-                bytes.removeFirst(newline + 1)
-            }
-        }
-
-        let raw = String(decoding: bytes, as: UTF8.self)
+        guard let raw = readRaw(url: url, limit: limit) else { return nil }
         let (headerText, bodyText) = splitHeaderBody(raw)
         let headers = parseHeaders(headerText)
 
@@ -54,6 +56,11 @@ enum EmlxParser {
         parsed.bcc = addressList(headers["bcc"] ?? "")
         parsed.date = parseDate(headers["date"] ?? "")
         parsed.messageID = (headers["message-id"] ?? "").trimmingCharacters(in: .whitespaces)
+        parsed.inReplyTo = normalizeMessageID(headers["in-reply-to"] ?? "")
+        parsed.references = (headers["references"] ?? "")
+            .components(separatedBy: .whitespacesAndNewlines)
+            .map(normalizeMessageID)
+            .filter { !$0.isEmpty }
         parsed.deliveredTo = (headers["delivered-to"] ?? headers["x-original-to"] ?? "")
             .trimmingCharacters(in: .whitespaces)
 
@@ -61,8 +68,33 @@ enum EmlxParser {
         parsed.body = includeBody ? content.text : String(content.text.prefix(400))
         parsed.htmlBody = includeBody ? content.html : ""
         parsed.inlineImages = includeBody ? content.images : [:]
-        parsed.hasAttachments = (headers["content-type"] ?? "").lowercased().contains("multipart/mixed")
+        // 附件只留元数据，不读字节——保存时再按 partIndex 回原文件取
+        parsed.attachments = content.attachments
+        parsed.hasAttachments = !content.attachments.isEmpty
+            || (headers["content-type"] ?? "").lowercased().contains("multipart/mixed")
         return parsed
+    }
+
+    /// Message-ID 统一成不带尖括号的形式，便于比较
+    private static func normalizeMessageID(_ raw: String) -> String {
+        raw.trimmingCharacters(in: CharacterSet(charactersIn: "<> \t\r\n"))
+    }
+
+    /// 读文件正文并剥掉 `.emlx` 首行的字节数
+    private static func readRaw(url: URL, limit: Int) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.read(upToCount: limit), !data.isEmpty else { return nil }
+
+        var bytes = [UInt8](data)
+        // .emlx 首行是 RFC822 的字节数
+        if let newline = bytes.firstIndex(of: 0x0A) {
+            let head = bytes[0..<newline]
+            if !head.isEmpty, head.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) {
+                bytes.removeFirst(newline + 1)
+            }
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 
     // MARK: - 头 / 体
@@ -114,52 +146,80 @@ enum EmlxParser {
         var text = ""
         var html = ""
         var images: [String: Data] = [:]
+        var attachments: [Attachment] = []
     }
 
-    /// 一次遍历同时收集 text/plain、text/html 和带 Content-ID 的内联图片。
-    /// 旧版只返回纯文本（HTML 被剥掉），阅读页要渲染 HTML 就必须保留原文。
-    private static func extractContent(headers: [String: String], body: String, includeImages: Bool) -> BodyContent {
+    /// 一个叶子 MIME part。`index` 在整封信里按深度优先编号，
+    /// 保存附件时按它回原文件取字节——两次解析的结果必须一致，所以编号不能用哈希
+    private struct MimePart {
+        var index: Int
+        var headers: [String: String]
+        var body: String
+    }
+
+    /// 把整封信摊平成叶子 part 列表（嵌套 multipart 递归展开）
+    private static func flatten(headers: [String: String], body: String, into parts: inout [MimePart]) {
         let contentType = headers["content-type"] ?? "text/plain"
         let lower = contentType.lowercased()
+
+        guard lower.contains("multipart/"), let boundary = boundaryValue(from: contentType) else {
+            parts.append(MimePart(index: parts.count, headers: headers, body: body))
+            return
+        }
+
+        for chunk in body.components(separatedBy: "--" + boundary) {
+            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == "--" || trimmed.hasPrefix("--") { continue }
+            let (partHeaders, partBody) = splitHeaderBody(chunk)
+            let parsed = parseHeaders(partHeaders)
+            let partType = (parsed["content-type"] ?? "text/plain").lowercased()
+            if partType.contains("multipart/") {
+                flatten(headers: parsed, body: partBody, into: &parts)
+            } else {
+                parts.append(MimePart(index: parts.count, headers: parsed, body: partBody))
+            }
+        }
+    }
+
+    /// 一次遍历同时收集 text/plain、text/html、带 Content-ID 的内联图片和附件元数据。
+    /// 旧版只返回纯文本（HTML 被剥掉），阅读页要渲染 HTML 就必须保留原文。
+    private static func extractContent(headers: [String: String], body: String, includeImages: Bool) -> BodyContent {
         var content = BodyContent()
+        var parts: [MimePart] = []
+        flatten(headers: headers, body: body, into: &parts)
 
-        if lower.contains("multipart/"), let boundary = boundaryValue(from: contentType) {
-            let parts = body.components(separatedBy: "--" + boundary)
-            for part in parts {
-                let trimmed = part.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty || trimmed == "--" || trimmed.hasPrefix("--") { continue }
-                let (partHeaders, partBody) = splitHeaderBody(part)
-                let parsed = parseHeaders(partHeaders)
-                let partType = (parsed["content-type"] ?? "text/plain").lowercased()
+        for part in parts {
+            let parsed = part.headers
+            let partType = (parsed["content-type"] ?? "text/plain").lowercased()
+            let cid = (parsed["content-id"] ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
 
-                if partType.contains("multipart/") {
-                    let nested = extractContent(headers: parsed, body: partBody, includeImages: includeImages)
-                    if content.text.isEmpty { content.text = nested.text }
-                    if content.html.isEmpty { content.html = nested.html }
-                    content.images.merge(nested.images) { current, _ in current }
-                    continue
-                }
-                if partType.contains("text/plain"), content.text.isEmpty {
-                    let text = decodeSingle(headers: parsed, body: partBody)
-                    if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { content.text = text }
-                }
-                if partType.contains("text/html"), content.html.isEmpty {
-                    content.html = decodeSingle(headers: parsed, body: partBody)
-                }
-                if includeImages, partType.hasPrefix("image/"), !partType.contains("svg") {
-                    let cid = (parsed["content-id"] ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "<> "))
-                    if !cid.isEmpty, content.images.count < 30,
-                       let data = decodePartData(headers: parsed, body: partBody), data.count <= 2_097_152 {
-                        content.images[cid] = data
-                    }
+            if partType.contains("text/plain"), content.text.isEmpty {
+                let text = decodeSingle(headers: parsed, body: part.body)
+                if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { content.text = text }
+            }
+            if partType.contains("text/html"), content.html.isEmpty {
+                content.html = decodeSingle(headers: parsed, body: part.body)
+            }
+            if includeImages, partType.hasPrefix("image/"), !partType.contains("svg"), !cid.isEmpty {
+                if content.images.count < 30,
+                   let data = decodePartData(headers: parsed, body: part.body), data.count <= 2_097_152 {
+                    content.images[cid] = data
                 }
             }
-        } else {
-            let text = decodeSingle(headers: headers, body: body)
-            if lower.contains("text/html") {
-                content.html = text
-            } else {
-                content.text = text
+
+            // 附件判定：有 content-disposition: attachment，或者有文件名且不是正文/内联图。
+            // 内联图片（有 Content-ID）不算附件——它们要进 HTML 渲染，不该出现在附件列表里
+            let disposition = (parsed["content-disposition"] ?? "").lowercased()
+            let name = filenameValue(from: parsed)
+            let isInlinePart = !cid.isEmpty
+            if !name.isEmpty, !isInlinePart,
+               disposition.contains("attachment") || !partType.hasPrefix("text/") {
+                content.attachments.append(Attachment(
+                    filename: name,
+                    mime: partType.components(separatedBy: ";").first ?? partType,
+                    size: approximateSize(headers: parsed, body: part.body),
+                    partIndex: part.index
+                ))
             }
         }
 
@@ -168,6 +228,56 @@ enum EmlxParser {
             content.text = readableText(fromHTML: content.html)
         }
         return content
+    }
+
+    /// `Content-Disposition: attachment; filename="x.pdf"` 或
+    /// `Content-Type: application/pdf; name="x.pdf"`，也可能是 RFC 2231 的 `filename*=UTF-8''...`
+    private static func filenameValue(from headers: [String: String]) -> String {
+        func parameter(_ raw: String, _ key: String) -> String? {
+            guard let range = raw.range(of: key + "=", options: .caseInsensitive) else { return nil }
+            var rest = raw[range.upperBound...]
+            if rest.hasPrefix("\"") {
+                rest = rest.dropFirst()
+                guard let end = rest.firstIndex(of: "\"") else { return nil }
+                return String(rest[..<end])
+            }
+            return String(rest.prefix { $0 != ";" && $0 != " " })
+        }
+
+        for source in [headers["content-disposition"] ?? "", headers["content-type"] ?? ""] {
+            // RFC 2231：filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf
+            if let star = parameter(source, "filename*") ?? nil,
+               let encoded = star.components(separatedBy: "''").last,
+               let decoded = encoded.removingPercentEncoding, !decoded.isEmpty {
+                return decoded
+            }
+            if let plain = parameter(source, "filename") ?? parameter(source, "name"),
+               !plain.isEmpty {
+                return decodeHeader(plain)
+            }
+        }
+        return ""
+    }
+
+    /// 不解码，直接按编码形式估算字节数——附件列表只要个大概，
+    /// 为了显示大小去解一个 20MB 的 base64 不值得
+    private static func approximateSize(headers: [String: String], body: String) -> Int {
+        switch (headers["content-transfer-encoding"] ?? "").lowercased() {
+        case "base64":
+            return body.count * 3 / 4
+        default:
+            return body.utf8.count
+        }
+    }
+
+    /// 按 part 序号回原文件取附件字节。点击「保存」时才调用，不常驻内存
+    static func attachmentData(url: URL, partIndex: Int) -> Data? {
+        guard let raw = readRaw(url: url, limit: 64_000_000) else { return nil }
+        let (headerText, bodyText) = splitHeaderBody(raw)
+        var parts: [MimePart] = []
+        flatten(headers: parseHeaders(headerText), body: bodyText, into: &parts)
+        guard let part = parts.first(where: { $0.index == partIndex }) else { return nil }
+        return decodePartData(headers: part.headers, body: part.body)
     }
 
     /// 附件 part 的原始字节（内联图片用）。不做 charset 转换——图片不是文本。

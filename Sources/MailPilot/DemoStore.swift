@@ -565,6 +565,17 @@ final class DemoStore: MailStore {
         refreshCounts()
     }
 
+    func setRead(_ read: Bool, for message: Message) async throws {
+        guard let index = all.firstIndex(where: { $0.id == message.id }) else { return }
+        all[index].unread = !read
+        refreshCounts()
+    }
+
+    func setFlagged(_ flagged: Bool, for message: Message) async throws {
+        guard let index = all.firstIndex(where: { $0.id == message.id }) else { return }
+        all[index].flagged = flagged
+    }
+
     func badgeCounts() async throws -> [String: Int] {
         var out: [String: Int] = [:]
         for box in SmartBox.allCases {

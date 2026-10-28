@@ -77,8 +77,25 @@ struct AskBar: View {
                     Text("只是移入「邮件」App 的废纸篓，可以在那里恢复。")
                         .font(.app(11))
                         .foregroundStyle(.secondary)
+                    if model.sessionTrashCount > 0 {
+                        Text("本次对话已删除 \(model.sessionTrashCount) 封，单次最多 5 封。")
+                            .font(.app(11))
+                            .foregroundStyle(Theme.gold)
+                    }
                 }
             }
+        }
+        .alert(
+            "把问题发送给不可信模型？",
+            isPresented: Binding(
+                get: { model.pendingAskConfirm != nil },
+                set: { presented in if !presented { model.resolveAskConfirmation(false) } }
+            )
+        ) {
+            Button("发送") { model.resolveAskConfirmation(true) }
+            Button("取消", role: .cancel) { model.resolveAskConfirmation(false) }
+        } message: {
+            Text("目标：\(model.pendingAskConfirm?.providerName ?? "") / \(model.pendingAskConfirm?.model ?? "")\n\n工具读到的邮件内容会先脱敏。但脱敏防不住语义信息，重要内容请换成本地模型。")
         }
         .confirmationDialog("清空全部对话记录？", isPresented: $ui.showClearConfirm) {
             Button("清空", role: .destructive) { model.clearAskHistory() }
@@ -278,6 +295,18 @@ struct AskBar: View {
                     // Markdown 渲染：标题 / 列表 / 代码块 / 粗体不再以源码形式露出
                     MarkdownText(text: turn.answer, baseSize: 12)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                // 静默脱敏是信任黑洞：必须让用户看见这次到底改掉了什么
+                if !turn.redactions.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.app(9))
+                        Text("已脱敏 \(turn.redactions.count) 处：\(Redactor.summary(turn.redactions))")
+                            .font(.app(10))
+                    }
+                    .foregroundStyle(Theme.gold)
+                    .padding(.leading, 17)
                 }
 
                 // 每条回答的操作条：复制、重跑

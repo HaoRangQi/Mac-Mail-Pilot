@@ -65,10 +65,13 @@ struct Mailbox: Identifiable, Hashable {
 }
 
 struct Attachment: Identifiable, Hashable {
-    var id: String { filename }
+    var id: String { "\(partIndex)-\(filename)" }
     var filename: String
     var mime: String = ""
     var size: Int = 0
+    /// 在 MIME 里的第几个叶子 part。保存时才按它回原文件取字节，
+    /// 不把附件内容一直挂在 Message 上——一封带 20MB 附件的邮件不能占 20MB 内存
+    var partIndex: Int = -1
 
     var sizeText: String {
         guard size > 0 else { return "" }
@@ -97,6 +100,8 @@ struct Message: Identifiable, Hashable {
     var flagged: Bool = false
     var needsReply: Bool = false
     var threadID: String = ""
+    /// 回复链（References 头，从旧到新）
+    var references: [String] = []
     /// RFC 2822 Message-ID（含尖括号），AppleScript 在「邮件」App 中定位消息用
     var messageID: String = ""
     var attachments: [Attachment] = []
@@ -121,6 +126,10 @@ protocol MailStore: AnyObject {
     func search(_ query: String, limit: Int) async throws -> [Message]
     /// 把邮件移入「邮件」App 的废纸篓（真实删除，走 AppleScript）
     func moveToTrash(_ message: Message) async throws
+    /// 标记已读 / 未读（走 AppleScript，只有「邮件」App 知道怎么改旗标）
+    func setRead(_ read: Bool, for message: Message) async throws
+    /// 加 / 取消旗标
+    func setFlagged(_ flagged: Bool, for message: Message) async throws
     /// 侧边栏「个人收藏」与「智能邮箱」的角标
     func badgeCounts() async throws -> [String: Int]
 }

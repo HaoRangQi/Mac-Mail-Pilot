@@ -393,15 +393,28 @@ enum AIService {
     /// 循环：发出请求 → 模型若要调工具就交给 `execute` 执行 → 结果回传 → 再请求，
     /// 直到模型给出最终文本或达到轮数上限。`maxRounds` 防止模型无限调工具。
     ///
-    /// 目前只实现 OpenAI 兼容协议（`.openai` 与 `.ollama`），Anthropic 的 tools 格式不同，后续再加。
+    /// OpenAI 兼容协议和 Anthropic 的 tools 格式不同，走两条实现：
+    /// 前者是 `tool_calls` + `role: tool`，后者是内容块 `tool_use` / `tool_result`。
     static func chatWithTools(provider: AIProvider,
                               model: String,
                               system: String,
                               user: String,
                               tools: [[String: Any]],
                               maxRounds: Int = 4,
+                              redaction: RedactionContext? = nil,
                               execute: @escaping (ToolCall) async throws -> String) async throws -> String {
         guard provider.enabled, !model.isEmpty else { throw AIError.notConfigured }
+
+        if provider.kind == .anthropic {
+            return try await anthropicChatWithTools(provider: provider,
+                                                    model: model,
+                                                    system: system,
+                                                    user: user,
+                                                    tools: tools,
+                                                    maxRounds: maxRounds,
+                                                    redaction: redaction,
+                                                    execute: execute)
+        }
 
         let keys = keyCandidates(provider)
         guard !keys.isEmpty else { throw AIError.noKey }
@@ -411,9 +424,10 @@ enum AIService {
             throw AIError.notConfigured
         }
 
+        // 脱敏必须是**会话级**的：工具结果与后续提问共用同一套占位符编号
         var messages: [[String: Any]] = [
-            ["role": "system", "content": system],
-            ["role": "user", "content": user],
+            ["role": "system", "content": redaction?.mask(system) ?? system],
+            ["role": "user", "content": redaction?.mask(user) ?? user],
         ]
 
         var lastError: Error = AIError.notConfigured
@@ -486,10 +500,120 @@ enum AIService {
                         } catch {
                             result = "执行失败：\(error.localizedDescription)"
                         }
-                        messages.append(["role": "tool", "tool_call_id": callID, "content": result])
+                        // 工具返回里就是邮件正文和发件人，必须过同一套脱敏
+                        messages.append(["role": "tool", "tool_call_id": callID,
+                                         "content": redaction?.mask(result) ?? result])
                     }
                 }
                 throw AIError.empty   // 轮数用尽，模型还在要工具
+            } catch let error as AIError {
+                if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
+                    lastError = error
+                    continue
+                }
+                throw error
+            }
+        }
+        throw lastError
+    }
+
+    // MARK: - Anthropic tool calling
+
+    /// Anthropic 的工具调用循环。
+    ///
+    /// 和 OpenAI 的三处结构差异：
+    /// 1. system 是顶层字段，不是 messages 里的一条
+    /// 2. 工具定义是 `{name, description, input_schema}`，没有 `function` 包一层
+    /// 3. 工具结果不是 `role: tool`，而是**用户消息里的 `tool_result` 内容块**
+    private static func anthropicChatWithTools(provider: AIProvider,
+                                               model: String,
+                                               system: String,
+                                               user: String,
+                                               tools: [[String: Any]],
+                                               maxRounds: Int,
+                                               redaction: RedactionContext?,
+                                               execute: @escaping (ToolCall) async throws -> String) async throws -> String {
+        let keys = keyCandidates(provider)
+        guard !keys.isEmpty else { throw AIError.noKey }
+
+        let spec = chatPath(provider.kind)
+        guard let url = endpoint(provider.baseURL, spec.path, needsV1: spec.needsV1) else {
+            throw AIError.notConfigured
+        }
+
+        let maskedSystem = redaction?.mask(system) ?? system
+        var messages: [[String: Any]] = [
+            ["role": "user", "content": redaction?.mask(user) ?? user],
+        ]
+        let anthropicTools = tools.compactMap { item -> [String: Any]? in
+            guard let function = item["function"] as? [String: Any],
+                  let name = function["name"] as? String else { return nil }
+            return [
+                "name": name,
+                "description": function["description"] as? String ?? "",
+                "input_schema": function["parameters"] as? [String: Any]
+                    ?? ["type": "object", "properties": [:], "required": []],
+            ]
+        }
+
+        var lastError: Error = AIError.notConfigured
+        for key in keys {
+            do {
+                for _ in 0..<maxRounds {
+                    var body: [String: Any] = [
+                        "model": model,
+                        "system": maskedSystem,
+                        "messages": messages,
+                        "max_tokens": 4096,
+                        "temperature": 0.4,
+                    ]
+                    if !anthropicTools.isEmpty { body["tools"] = anthropicTools }
+
+                    let data = try await send(url: url, method: "POST",
+                                              headers: authHeaders(provider.kind, key), body: body)
+                    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                          let content = json["content"] as? [[String: Any]] else {
+                        throw AIError.empty
+                    }
+
+                    let text = content
+                        .filter { ($0["type"] as? String) == "text" }
+                        .compactMap { $0["text"] as? String }
+                        .joined(separator: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    let toolUses = content.filter { ($0["type"] as? String) == "tool_use" }
+
+                    if toolUses.isEmpty {
+                        if !text.isEmpty { return text }
+                        let stop = json["stop_reason"] as? String ?? "未知"
+                        throw AIError.emptyResponse("stop_reason=\(stop)")
+                    }
+
+                    // assistant 的内容块必须原样回传，协议要求上下文里有那段 tool_use
+                    messages.append(["role": "assistant", "content": content])
+
+                    var results: [[String: Any]] = []
+                    for use in toolUses {
+                        let useID = use["id"] as? String ?? UUID().uuidString
+                        guard let name = use["name"] as? String,
+                              let tool = MailTool(rawValue: name) else {
+                            results.append(["type": "tool_result", "tool_use_id": useID,
+                                            "content": "工具不存在或无法解析"])
+                            continue
+                        }
+                        let arguments = use["input"] as? [String: Any] ?? [:]
+                        let result: String
+                        do {
+                            result = try await execute(ToolCall(id: useID, tool: tool, arguments: arguments))
+                        } catch {
+                            result = "执行失败：\(error.localizedDescription)"
+                        }
+                        results.append(["type": "tool_result", "tool_use_id": useID,
+                                        "content": redaction?.mask(result) ?? result])
+                    }
+                    messages.append(["role": "user", "content": results])
+                }
+                throw AIError.empty
             } catch let error as AIError {
                 if case .http(let code, _) = error, code == 401 || code == 403 || code == 429 {
                     lastError = error

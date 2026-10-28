@@ -12,7 +12,7 @@ import Foundation
 /// - 模型可能改写或吃掉占位符，此时还原失败但不会报错，宁留占位符不搞坏内容
 struct Redactor {
 
-    struct Mapping {
+    struct Mapping: Codable, Hashable {
         let placeholder: String
         let original: String
     }
@@ -37,6 +37,9 @@ struct Redactor {
     /// 全部用前后断言而不是 `\b`：`\b` 是 ASCII 词边界，
     /// 「电话13800138000」这种前后紧贴汉字的情况 `\b` 根本匹配不上。
     private static let rules: [Rule] = [
+        // 放最前面：跟踪链接里的 `uid=` / `email=` 后面跟着的就是用户标识，
+        // 而值里常含数字，先让其他规则匹配会把链接切碎。只替换参数值不动链接结构
+        Rule(name: "链接参数", pattern: "(?<=[?&])(?:uid|user|userid|user_id|email|e|mid|sid|token|key|sig|signature)=[^&\\s\"'<>]+", hint: "链接里的用户标识参数（跟踪链接常见）"),
         Rule(name: "身份证", pattern: "(?<![0-9])[0-9]{17}[0-9Xx](?![0-9])|(?<![0-9])[0-9]{15}(?![0-9])", hint: "18 位或 15 位身份证号"),
         Rule(name: "银行卡", pattern: "(?<![0-9])[0-9](?:[ -]?[0-9]){15,18}(?![0-9])", hint: "16-19 位卡号，允许空格或连字符分组；长订单号可能被误伤"),
         Rule(name: "手机号", pattern: "(?<![0-9])1[3-9][0-9]{9}(?![0-9])", hint: "11 位手机号"),
@@ -193,5 +196,39 @@ struct Redactor {
         guard !mappings.isEmpty else { return "" }
         let grouped = Dictionary(grouping: mappings) { String($0.placeholder.dropFirst().dropLast().prefix(while: { !$0.isNumber })) }
         return grouped.map { type, rows in "\(type)×\(rows.count)" }.joined(separator: "、")
+    }
+}
+
+/// 一轮工具对话的脱敏上下文。
+///
+/// 必须是**会话级**而不是每次工具调用新建：模型会在第 2 轮引用第 1 轮工具结果里的
+/// `⟨邮箱1⟩`。如果每轮各开一个 `Session`，编号会从头开始，
+/// 还原时就会把 A 段的邮箱写进 B 段——草稿里出现别人的邮箱比不脱敏更糟。
+final class RedactionContext {
+    private let session: Redactor.Session
+    let enabled: Bool
+
+    init(enabled: Bool,
+         disabledRules: Set<String> = [],
+         customRules: [CustomRedactionRule] = [],
+         keywords: [String] = []) {
+        self.enabled = enabled
+        session = Redactor.Session(disabledRules: disabledRules,
+                                   customRules: customRules,
+                                   keywords: keywords)
+    }
+
+    /// 每一段外发文本都要过这里：system、用户问题、每次工具返回
+    func mask(_ text: String) -> String {
+        enabled ? session.redact(text) : text
+    }
+
+    var mappings: [Redactor.Mapping] { session.mappings }
+
+    /// 只还原**给用户看**的最终回答。
+    /// 工具参数（真正要发出去的内容）绝不能走这里——还原等于把真实值写成外发邮件。
+    func restore(_ text: String) -> String {
+        guard enabled, !session.mappings.isEmpty else { return text }
+        return Redactor.restore(text, session.mappings)
     }
 }

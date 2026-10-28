@@ -190,6 +190,7 @@ struct SidebarView: View {
     private func accountHeader(_ account: Account) -> some View {
         let collapsed = model.collapsedSections.contains(account.id)
         let unread = unreadCount(for: account)
+        let locked = model.guards.isAccountLocked(account.id)
         return Button {
             withAnimation(.easeInOut(duration: 0.14)) {
                 model.toggleSection(account.id)
@@ -206,6 +207,12 @@ struct SidebarView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
+                // 上锁只影响 AI 可见性，界面照常显示邮件——人自己要看的东西不该被藏
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .font(.app(8))
+                        .foregroundStyle(Theme.brick.opacity(0.85))
+                }
                 if unread > 0 {
                     Text("\(unread)")
                         .font(.app(9.5))
@@ -218,7 +225,15 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(account.email)
+        .contextMenu {
+            Button {
+                model.toggleAccountLock(account)
+            } label: {
+                Label(locked ? "对 AI 解锁这个账号" : "对 AI 上锁这个账号",
+                      systemImage: locked ? "lock.open" : "lock")
+            }
+        }
+        .help(locked ? "\(account.email)\n已上锁：不可信模型看不到这个账号的邮件" : account.email)
     }
 
     private func unreadCount(for account: Account) -> Int {

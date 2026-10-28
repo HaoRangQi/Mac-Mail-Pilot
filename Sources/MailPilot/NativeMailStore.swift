@@ -5,6 +5,8 @@ final class NativeMailStore: MailStore {
     let isDemo = false
 
     private let root: URL
+    /// 元数据索引。打不开就退回「每次现场解析」，功能不受影响，只是慢
+    private let index: MailIndex?
     private var boxes: [Mailbox] = []
     private var accountNames: [String: String] = [:]
     private var accountNameCache: [String: String] = [:]
@@ -14,10 +16,20 @@ final class NativeMailStore: MailStore {
         guard case .authorized = MailAccess.status(),
               let version = MailAccess.versionDirectory() else { return nil }
         root = version
+        index = Self.indexFileURL().flatMap { MailIndex(fileURL: $0) }
         loadAccountNames()
         boxes = discoverMailboxes()
         guard !boxes.isEmpty else { return nil }
         writeDiagnostics()
+    }
+
+    /// `~/Library/Application Support/MailPilot/index.sqlite`
+    ///
+    /// 这是**缓存**，删掉只会让下次启动慢一点；上锁和豁免的记录不在这里，丢不了。
+    static func indexFileURL() -> URL? {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                                  in: .userDomainMask).first else { return nil }
+        return base.appendingPathComponent("MailPilot/index.sqlite")
     }
 
     // MARK: - MailStore
@@ -49,6 +61,14 @@ final class NativeMailStore: MailStore {
             return smartMessages(smart, limit: limit)
         }
         guard let box = boxes.first(where: { $0.id == mailboxID }) else { return [] }
+
+        // 有索引就走索引：只 stat 文件，不再逐封解析
+        if let index {
+            syncIndex(for: box)
+            let rows = index.messages(mailboxID: box.id, limit: limit)
+            if !rows.isEmpty { return rows.map(message(from:)) }
+        }
+
         let dir = directory(for: box)
         // 先按文件时间粗取 2 倍候选，再按邮件头 Date 精排：
         // Mail 迁移/重建索引会把 .emlx 的 mtime 统一刷成迁移时间，
@@ -68,6 +88,16 @@ final class NativeMailStore: MailStore {
     func search(_ query: String, limit: Int) async throws -> [Message] {
         let q = query.lowercased()
         guard !q.isEmpty else { return [] }
+
+        // 索引可用时搜索走 FTS：覆盖全部邮件，而不是「每个邮箱最近 400 封」
+        if let index {
+            for box in boxes where box.role == .inbox || box.role == .archive {
+                syncIndex(for: box)
+            }
+            let rows = index.search(query, limit: limit)
+            if !rows.isEmpty { return rows.map(message(from:)) }
+        }
+
         var results: [Message] = []
         for box in boxes where box.role == .inbox || box.role == .archive {
             let files = emlxFiles(in: directory(for: box)).sorted { $0.1 > $1.1 }.prefix(400)
@@ -83,6 +113,40 @@ final class NativeMailStore: MailStore {
             }
         }
         return results
+    }
+
+    // MARK: - 索引同步
+
+    /// 只 stat 不解析：文件没变就直接用索引里的旧行
+    private func syncIndex(for box: Mailbox) {
+        guard let index else { return }
+        let result = MailIndexer.scan(
+            directory: directory(for: box),
+            root: root,
+            mailboxID: box.id,
+            accountID: box.accountID,
+            known: index.indexedFiles(mailboxID: box.id)
+        )
+        if !result.fresh.isEmpty { index.upsert(result.fresh) }
+        // 空目录也照常标 missing：邮箱被清空时索引里的记录要跟着消失
+        index.markMissing(notIn: result.present, mailboxID: box.id)
+    }
+
+    /// 索引里只有元数据，正文留空——阅读页会调 `message(id:)` 现读文件
+    private func message(from row: IndexedMessage) -> Message {
+        Message(
+            id: row.path,
+            accountID: row.accountID,
+            mailboxID: row.mailboxID,
+            subject: row.subject,
+            sender: row.sender,
+            senderEmail: row.senderEmail,
+            date: row.date,
+            preview: row.preview,
+            body: "",
+            threadID: row.threadRoot,
+            messageID: row.messageID
+        )
     }
 
     func badgeCounts() async throws -> [String: Int] {
@@ -105,6 +169,36 @@ final class NativeMailStore: MailStore {
             throw MailMutatorError.notFound("找不到这封邮件所在的邮箱")
         }
         try await MailMutator.moveToTrash(
+            accountID: message.accountID,
+            accountName: accountDisplayName(message.accountID),
+            accountEmail: accountEmail(message.accountID),
+            mailboxName: box.rawName,
+            messageID: message.messageID
+        )
+    }
+
+    func setRead(_ read: Bool, for message: Message) async throws {
+        guard !message.messageID.isEmpty else { throw MailMutatorError.missingMessageID }
+        guard let box = boxes.first(where: { $0.id == message.mailboxID }) else {
+            throw MailMutatorError.notFound("找不到这封邮件所在的邮箱")
+        }
+        try await MailMutator.setRead(
+            read,
+            accountID: message.accountID,
+            accountName: accountDisplayName(message.accountID),
+            accountEmail: accountEmail(message.accountID),
+            mailboxName: box.rawName,
+            messageID: message.messageID
+        )
+    }
+
+    func setFlagged(_ flagged: Bool, for message: Message) async throws {
+        guard !message.messageID.isEmpty else { throw MailMutatorError.missingMessageID }
+        guard let box = boxes.first(where: { $0.id == message.mailboxID }) else {
+            throw MailMutatorError.notFound("找不到这封邮件所在的邮箱")
+        }
+        try await MailMutator.setFlagged(
+            flagged,
             accountID: message.accountID,
             accountName: accountDisplayName(message.accountID),
             accountEmail: accountEmail(message.accountID),
@@ -452,6 +546,84 @@ final class NativeMailStore: MailStore {
         emlxFiles(in: directory(for: box)).count
     }
 
+    // MARK: - 上锁记录的存活检查
+
+    /// 主线程上取快照，扫描放到后台线程跑。
+    /// 直接让后台读实例的 `boxes` 会和 `mailboxes()` 里的写入竞争。
+    func guardPresenceSnapshot() -> (root: URL, boxes: [Mailbox])? {
+        boxes.isEmpty ? nil : (root, boxes)
+    }
+
+    /// 启动后同步用：这批被上锁的邮件现在还在不在磁盘上。
+    ///
+    /// 先按记录里的路径判断（只 stat，代价是 O(锁的数量)）；只有路径失效的才做一次
+    /// 全量兜底，按 Message-ID 找回来——否则「把邮件从收件箱挪到归档」会被误判成
+    /// 「已删除」，20 天后锁就被 TTL 清掉了。
+    ///
+    /// - Returns: 记录键 → 当前路径（`native:xxx`）。
+    ///   **返回 nil 表示这轮没法判断**（一个文件都没扫到，通常是权限问题），
+    ///   调用方必须跳过清理——传空表进去会把所有锁一次清光。
+    static func guardPresence(root: URL,
+                              boxes: [Mailbox],
+                              records: [String: GuardRecord]) -> [String: String]? {
+        guard !boxes.isEmpty else { return nil }
+
+        var found: [String: String] = [:]
+        var unresolved: [(key: String, record: GuardRecord)] = []
+
+        for (key, record) in records {
+            let rel = record.pathHint.hasPrefix("native:")
+                ? String(record.pathHint.dropFirst("native:".count))
+                : record.pathHint
+            if !rel.isEmpty,
+               FileManager.default.fileExists(atPath: root.appendingPathComponent(rel).path) {
+                found[key] = record.pathHint
+            } else {
+                unresolved.append((key, record))
+            }
+        }
+
+        guard !unresolved.isEmpty else { return found }
+
+        let base = root.standardizedFileURL.path
+        var pathByMessageID: [String: String] = [:]
+        var scanned = 0
+
+        for box in boxes {
+            let dir = root.appendingPathComponent(String(box.id.dropFirst("native:".count)))
+            guard let enumerator = FileManager.default.enumerator(
+                at: dir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+
+            for case let url as URL in enumerator {
+                let name = url.lastPathComponent
+                guard name.hasSuffix(".emlx") || name.hasSuffix(".emlx.partial") else { continue }
+                scanned += 1
+                guard let parsed = EmlxParser.parse(url: url, includeBody: false),
+                      !parsed.messageID.isEmpty else { continue }
+
+                var path = url.standardizedFileURL.path
+                if path.hasPrefix(base) {
+                    path = String(path.dropFirst(base.count))
+                    if path.hasPrefix("/") { path.removeFirst() }
+                }
+                pathByMessageID[parsed.messageID] = "native:" + path
+            }
+        }
+
+        // 一个文件都没扫到 = 权限出问题了，不能据此判定「邮件被删」
+        guard scanned > 0 else { return nil }
+
+        for item in unresolved {
+            if let path = pathByMessageID[item.key] {
+                found[item.key] = path
+            }
+        }
+        return found
+    }
+
     private func makeMessage(url: URL, mailbox: Mailbox, includeBody: Bool) -> Message? {
         guard let parsed = EmlxParser.parse(url: url, includeBody: includeBody) else { return nil }
         let rel = relativePath(url)
@@ -475,9 +647,10 @@ final class NativeMailStore: MailStore {
             unread: false,
             flagged: false,
             needsReply: false,
-            threadID: parsed.messageID,
+            threadID: parsed.threadRoot,
+            references: parsed.references,
             messageID: parsed.messageID,
-            attachments: [],
+            attachments: parsed.attachments,
             htmlBody: parsed.htmlBody,
             inlineImages: parsed.inlineImages
         )

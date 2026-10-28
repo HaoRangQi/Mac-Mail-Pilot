@@ -111,6 +111,57 @@ struct ReaderView: View {
         }
     }
 
+    /// 同一会话里的其他邮件。列表只显示最新一封，其余的在这里。
+    /// 只有一封时整条不渲染——单封邮件加一条「会话 1 封」只是噪音
+    @ViewBuilder
+    private func threadStrip(_ message: Message) -> some View {
+        let thread = model.selectedThread
+        if thread.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    Text("会话 \(thread.count) 封")
+                        .font(.app(10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.trailing, 2)
+
+                    ForEach(thread) { item in
+                        Button {
+                            Task { await model.open(item) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text(item.displaySender)
+                                    .font(.app(10.5))
+                                    .lineLimit(1)
+                                Text(MessageListView.dateText(item.date))
+                                    .font(.app(9.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(height: 22)
+                            .background(
+                                item.id == message.id
+                                    ? Theme.accent.opacity(0.18)
+                                    : Color.primary.opacity(0.05),
+                                in: Capsule()
+                            )
+                            .overlay(Capsule().stroke(
+                                item.id == message.id ? Theme.accent.opacity(0.35) : Color.clear,
+                                lineWidth: 0.7
+                            ))
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .help(item.subject)
+                    }
+                }
+                .padding(.horizontal, 26)
+                .padding(.vertical, 8)
+            }
+            .hoverScrollIndicators()
+            Divider().opacity(0.3)
+        }
+    }
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "envelope.open")
@@ -124,6 +175,7 @@ struct ReaderView: View {
 
     private func detail(_ message: Message) -> some View {
         VStack(spacing: 0) {
+            threadStrip(message)
             if message.htmlBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 // 纯文本邮件：单滚动布局（原有行为，正文和头部一起滚）
                 ScrollView {
@@ -248,20 +300,31 @@ struct ReaderView: View {
         if !message.attachments.isEmpty {
             HStack(spacing: 7) {
                 ForEach(message.attachments) { att in
-                    HStack(spacing: 5) {
-                        Image(systemName: "paperclip")
-                            .font(.app(10))
-                        Text(att.filename)
-                            .font(.app(11.5))
-                        if !att.sizeText.isEmpty {
-                            Text(att.sizeText)
-                                .font(.app(10.5))
-                                .foregroundStyle(.tertiary)
+                    Button {
+                        Task { await model.saveAttachment(att, of: message) }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "paperclip")
+                                .font(.app(10))
+                            Text(att.filename)
+                                .font(.app(11.5))
+                                .lineLimit(1)
+                            if !att.sizeText.isEmpty {
+                                Text(att.sizeText)
+                                    .font(.app(10.5))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            Image(systemName: "arrow.down.circle")
+                                .font(.app(10))
+                                .foregroundStyle(.secondary)
                         }
+                        .padding(.horizontal, 9)
+                        .frame(height: 26)
+                        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+                        .contentShape(Rectangle())
                     }
-                    .padding(.horizontal, 9)
-                    .frame(height: 26)
-                    .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+                    .buttonStyle(.plain)
+                    .help("保存到…")
                 }
             }
             .padding(.top, 16)
@@ -328,7 +391,7 @@ struct ReaderView: View {
                 }
 
                 if let message = model.selected {
-                    exemptionToggle(message)
+                    protectionMenu(message)
                 }
 
                 aiButton("AI 摘要", icon: "sparkles") { model.summarize() }
@@ -489,54 +552,89 @@ struct ReaderView: View {
 
     /// 单封邮件的安全开关。
     ///
-    /// 只有三种状态，**当前生效的是哪一种永远显示在按钮上**——这是防止「绕晕」的关键：
-    /// 模型可信 / 按策略脱敏 / 本封已豁免。切模型时这个按钮的文案会跟着变，
-    /// 用户不用去设置里翻自己上次设了什么。
-    private func exemptionToggle(_ message: Message) -> some View {
+    /// 这封邮件对 AI 的态度。
+    ///
+    /// 原来这里只有一个「不敏感」开关，加上上锁之后两个控件会让人分不清区别——
+    /// 干脆合成一个菜单，因为对用户来说它们回答的是同一个问题：这封邮件给 AI 看到什么程度。
+    /// 按钮上的图标和提示**永远显示当前生效的那一种**，切模型时文案跟着变。
+    private func protectionMenu(_ message: Message) -> some View {
+        let locked = model.isLocked(message)
         let exempt = model.isExempt(message)
         let trusted = model.mainModelTrusted
 
-        let label: String
         let icon: String
         let tint: Color
-        if trusted {
-            label = "模型可信"
+        let label: String
+        if locked {
+            icon = "lock.fill"
+            tint = Theme.brick
+            label = "已上锁"
+        } else if trusted {
             icon = "checkmark.shield.fill"
             tint = Theme.moss
+            label = "模型可信"
         } else if exempt {
-            label = "本封不脱敏"
             icon = "shield.slash.fill"
             tint = Theme.gold
+            label = "本封不脱敏"
         } else {
-            label = "按策略脱敏"
             icon = "shield.lefthalf.filled"
             tint = .secondary
+            label = "按策略脱敏"
         }
 
-        return Button {
-            guard !trusted else { return }
-            model.setExempt(!exempt, for: message)
+        return Menu {
+            Button {
+                if locked || exempt {
+                    model.setLocked(false, for: message)
+                    model.setExempt(false, for: message)
+                }
+            } label: {
+                Label("跟随策略", systemImage: (!locked && !exempt) ? "checkmark" : "shield")
+            }
+
+            Button {
+                if locked { model.setLocked(false, for: message) }
+                model.setExempt(!exempt, for: message)
+            } label: {
+                Label(exempt ? "取消「不敏感」标记" : "标记为不敏感（跳过脱敏）",
+                      systemImage: exempt ? "checkmark" : "shield.slash")
+            }
+
+            Divider()
+
+            Button {
+                model.setLocked(!locked, for: message)
+            } label: {
+                Label(locked ? "解锁这封邮件" : "上锁（不可信模型不可见）",
+                      systemImage: locked ? "lock.fill" : "lock")
+            }
         } label: {
             Image(systemName: icon)
                 .font(.app(11, weight: .medium))
                 .foregroundStyle(tint)
                 .frame(width: 28, height: 28)
-                .background(tint.opacity(exempt ? 0.15 : 0.06), in: Circle())
-                .overlay(Circle().stroke(tint.opacity(exempt ? 0.45 : 0.14), lineWidth: 0.7))
+                .background(tint.opacity(locked || exempt ? 0.15 : 0.06), in: Circle())
+                .overlay(Circle().stroke(tint.opacity(locked || exempt ? 0.45 : 0.14), lineWidth: 0.7))
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
-        .help("\(label)\n\(exemptionHelp(trusted: trusted, exempt: exempt))")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 28, height: 28)
+        .help("\(label)\n\(protectionHelp(locked: locked, exempt: exempt, trusted: trusted))")
     }
 
-    private func exemptionHelp(trusted: Bool, exempt: Bool) -> String {
+    private func protectionHelp(locked: Bool, exempt: Bool, trusted: Bool) -> String {
+        if locked {
+            return "这封邮件已上锁：不可信模型看不到它，AI 摘要 / 草拟 / 翻译都会拒绝。点开可解锁。"
+        }
         if trusted {
-            return "当前模型可信，本来就不脱敏。换成不可信模型时，这里会变成可点的开关。"
+            return "当前模型可信，本来就不脱敏。换成不可信模型时，这里会显示会怎么处理。"
         }
         if exempt {
-            return "这封邮件已标记为不敏感：在不可信模型上也原样发送，不脱敏、不弹确认。再点一次恢复。"
+            return "这封邮件已标记为不敏感：在不可信模型上也原样发送，不脱敏、不弹确认。"
         }
-        return "不可信模型下会按策略脱敏 / 弹确认。点一下把这封邮件标记为不敏感，内容原样发送。"
+        return "不可信模型下会按策略脱敏 / 弹确认。点开可以标记不敏感，或者上锁。"
     }
 
     private func aiButton(_ title: String,
@@ -601,6 +699,7 @@ struct ReaderView: View {
         case .reply: actionName = "草拟回复"
         case .classify: actionName = "分类"
         case .translate: actionName = "翻译"
+        case .ask: actionName = "邮箱问答"
         }
         var text = "动作：\(actionName)\n"
         if let provider = request.provider {
